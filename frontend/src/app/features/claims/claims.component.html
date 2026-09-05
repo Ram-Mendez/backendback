@@ -1,0 +1,179 @@
+<main class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">RAM</span>
+      <span>IDD Admin</span>
+    </div>
+    <nav aria-label="Principal">
+      <a class="active">Reclamaciones</a>
+    </nav>
+    <div class="session">
+      <span>{{ currentUser()?.username }}</span>
+      <small>{{ currentUser()?.email }}</small>
+      <button type="button" (click)="logout()">Salir</button>
+    </div>
+  </aside>
+
+  <section class="workspace">
+    <header class="topbar">
+      <div>
+        <h1>Reclamaciones</h1>
+        <p>{{ totalElements() }} registros</p>
+      </div>
+      @if (canCreate()) {
+        <button class="primary-button" type="button" (click)="openCreate()">Nueva reclamacion</button>
+      }
+    </header>
+
+    <section class="filters" [formGroup]="filtersForm" aria-label="Filtros">
+      <label>
+        Reclamante
+        <input type="search" formControlName="claimant" placeholder="Buscar reclamante">
+      </label>
+      <label>
+        Proveedor
+        <input type="search" formControlName="provider" placeholder="Proveedor">
+      </label>
+      <label>
+        Nº factura
+        <input type="search" formControlName="invoiceNumber" placeholder="Factura">
+      </label>
+      <label>
+        Estado
+        <select formControlName="status">
+          <option value="">Todos</option>
+          @for (status of statuses; track status) {
+            <option [value]="status">{{ labelFor(status) }}</option>
+          }
+        </select>
+      </label>
+      <label>
+        Desde
+        <input type="date" formControlName="createdFrom">
+      </label>
+      <label>
+        Hasta
+        <input type="date" formControlName="createdTo">
+      </label>
+      <button class="secondary-button" type="button" (click)="clearFilters()">Limpiar</button>
+    </section>
+
+    @if (errorMessage()) {
+      <div class="alert" role="alert">{{ errorMessage() }}</div>
+    }
+
+    <section class="table-panel" aria-live="polite">
+      @if (loading()) {
+        <div class="state">Cargando reclamaciones...</div>
+      } @else if (claims().length === 0) {
+        <div class="state">No hay reclamaciones con los filtros actuales.</div>
+      } @else {
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Reclamante</th>
+                <th>Proveedor</th>
+                <th>Nº factura</th>
+                <th>Importe</th>
+                <th>Fecha</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (claim of claims(); track claim.id) {
+                <tr>
+                  <td>{{ claim.id }}</td>
+                  <td>{{ claim.claimant }}</td>
+                  <td>{{ claim.provider }}</td>
+                  <td>{{ claim.invoiceNumber }}</td>
+                  <td>{{ claim.amount | number:'1.2-2' }} EUR</td>
+                  <td>{{ claim.createdAt | date:'dd/MM/yyyy' }}</td>
+                  <td>
+                    <span class="status" [class]="claim.status.toLowerCase()">{{ labelFor(claim.status) }}</span>
+                  </td>
+                  <td>
+                    <div class="actions">
+                      @if (canEdit()) {
+                        <button class="link-button" type="button" (click)="openEdit(claim)">Editar</button>
+                      }
+                      @if (canDelete()) {
+                        <button class="danger-button" type="button" (click)="deleteClaim(claim)">Eliminar</button>
+                      }
+                    </div>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </section>
+
+    <footer class="pagination">
+      <button type="button" (click)="previousPage()" [disabled]="pageNumber() === 0">Anterior</button>
+      <span>Pagina {{ pageNumber() + 1 }} de {{ totalPages() || 1 }}</span>
+      <button type="button" (click)="nextPage()" [disabled]="pageNumber() + 1 >= totalPages()">Siguiente</button>
+    </footer>
+  </section>
+
+  @if (formMode() !== 'closed') {
+    <section class="editor" aria-labelledby="claim-form-title">
+      <div class="editor-header">
+        <h2 id="claim-form-title">
+          {{ formMode() === 'create' ? 'Nueva reclamacion' : 'Editar reclamacion' }}
+        </h2>
+        <button class="icon-button" type="button" (click)="closeForm()" aria-label="Cerrar">x</button>
+      </div>
+
+      <form [formGroup]="claimForm" (ngSubmit)="submitClaim()" novalidate>
+        <label>
+          Reclamante
+          <input type="text" formControlName="claimant" [class.invalid]="claimForm.controls.claimant.touched && claimForm.controls.claimant.invalid">
+        </label>
+
+        <label>
+          Proveedor
+          <input type="text" formControlName="provider" [class.invalid]="claimForm.controls.provider.touched && claimForm.controls.provider.invalid">
+        </label>
+
+        <label>
+          Nº factura
+          <input type="text" formControlName="invoiceNumber" [class.invalid]="claimForm.controls.invoiceNumber.touched && claimForm.controls.invoiceNumber.invalid">
+        </label>
+
+        <label>
+          Importe
+          <input type="number" min="0" step="0.01" formControlName="amount" [class.invalid]="claimForm.controls.amount.touched && claimForm.controls.amount.invalid">
+        </label>
+
+        <label>
+          Estado
+          <select formControlName="status">
+            @for (status of statuses; track status) {
+              <option [value]="status">{{ labelFor(status) }}</option>
+            }
+          </select>
+        </label>
+
+        <label>
+          Descripcion
+          <textarea rows="5" formControlName="description"></textarea>
+        </label>
+
+        @if (formErrorMessage()) {
+          <div class="alert" role="alert">{{ formErrorMessage() }}</div>
+        }
+
+        <div class="form-actions">
+          <button class="secondary-button" type="button" (click)="closeForm()">Cancelar</button>
+          <button class="primary-button" type="submit" [disabled]="saving()">
+            {{ saving() ? 'Guardando...' : 'Guardar' }}
+          </button>
+        </div>
+      </form>
+    </section>
+  }
+</main>
