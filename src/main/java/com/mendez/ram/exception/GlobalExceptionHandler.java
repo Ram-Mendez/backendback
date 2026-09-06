@@ -8,6 +8,8 @@ import java.util.Map;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
@@ -23,6 +25,8 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+	private static final Logger LOGGER = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
 	private final Clock clock;
 
 	public GlobalExceptionHandler(Clock clock) {
@@ -31,6 +35,9 @@ public class GlobalExceptionHandler {
 
 	@ExceptionHandler(ApiException.class)
 	ResponseEntity<ProblemDetail> handleApiException(ApiException exception, HttpServletRequest request) {
+		LOGGER.warn("API error method={} path={} status={} code={} detail={}",
+				request.getMethod(), request.getRequestURI(), exception.getStatus().value(),
+				exception.getCode(), exception.getMessage());
 		return build(exception.getStatus(), exception.getCode(), exception.getStatus().getReasonPhrase(),
 				exception.getMessage(), request, Map.of());
 	}
@@ -41,6 +48,8 @@ public class GlobalExceptionHandler {
 		Map<String, String> fieldErrors = new LinkedHashMap<>();
 		exception.getBindingResult().getFieldErrors()
 				.forEach(error -> fieldErrors.put(error.getField(), error.getDefaultMessage()));
+		LOGGER.warn("Validation error method={} path={} fields={}",
+				request.getMethod(), request.getRequestURI(), fieldErrors);
 		return build(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Bad Request",
 				"La solicitud contiene datos invalidos.", request, fieldErrors);
 	}
@@ -51,6 +60,8 @@ public class GlobalExceptionHandler {
 		Map<String, String> fieldErrors = new LinkedHashMap<>();
 		exception.getConstraintViolations().forEach(violation ->
 				fieldErrors.put(violation.getPropertyPath().toString(), violation.getMessage()));
+		LOGGER.warn("Constraint violation method={} path={} fields={}",
+				request.getMethod(), request.getRequestURI(), fieldErrors);
 		return build(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Bad Request",
 				"La solicitud contiene datos invalidos.", request, fieldErrors);
 	}
@@ -58,6 +69,8 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(HttpMessageNotReadableException.class)
 	ResponseEntity<ProblemDetail> handleUnreadableMessage(HttpMessageNotReadableException exception,
 			HttpServletRequest request) {
+		LOGGER.warn("Malformed request method={} path={} cause={}",
+				request.getMethod(), request.getRequestURI(), rootCauseMessage(exception));
 		return build(HttpStatus.BAD_REQUEST, "MALFORMED_REQUEST", "Bad Request",
 				"El cuerpo de la solicitud no es valido.", request, Map.of());
 	}
@@ -65,12 +78,16 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(MethodArgumentTypeMismatchException.class)
 	ResponseEntity<ProblemDetail> handleTypeMismatch(MethodArgumentTypeMismatchException exception,
 			HttpServletRequest request) {
+		LOGGER.warn("Type mismatch method={} path={} parameter={} value={}",
+				request.getMethod(), request.getRequestURI(), exception.getName(), exception.getValue());
 		return build(HttpStatus.BAD_REQUEST, "INVALID_REQUEST_PARAMETER", "Bad Request",
 				"Parametro de solicitud no valido: " + exception.getName() + ".", request, Map.of());
 	}
 
 	@ExceptionHandler(AccessDeniedException.class)
 	ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException exception, HttpServletRequest request) {
+		LOGGER.warn("Access denied method={} path={} message={}",
+				request.getMethod(), request.getRequestURI(), exception.getMessage());
 		return build(HttpStatus.FORBIDDEN, "ACCESS_DENIED", "Forbidden",
 				"No tienes permisos para realizar esta accion.", request, Map.of());
 	}
@@ -78,6 +95,8 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(OptimisticLockingFailureException.class)
 	ResponseEntity<ProblemDetail> handleOptimisticLocking(OptimisticLockingFailureException exception,
 			HttpServletRequest request) {
+		LOGGER.warn("Optimistic lock conflict method={} path={} cause={}",
+				request.getMethod(), request.getRequestURI(), rootCauseMessage(exception), exception);
 		return build(HttpStatus.CONFLICT, "OPTIMISTIC_LOCK_CONFLICT", "Conflict",
 				"La reclamacion fue modificada por otro proceso. Recarga los datos e intentalo de nuevo.",
 				request, Map.of());
@@ -86,12 +105,17 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(DataIntegrityViolationException.class)
 	ResponseEntity<ProblemDetail> handleDataIntegrity(DataIntegrityViolationException exception,
 			HttpServletRequest request) {
+		LOGGER.error("Data integrity conflict method={} path={} cause={}",
+				request.getMethod(), request.getRequestURI(), rootCauseMessage(exception), exception);
 		return build(HttpStatus.CONFLICT, "DATA_INTEGRITY_CONFLICT", "Conflict",
 				"La operacion entra en conflicto con los datos existentes.", request, Map.of());
 	}
 
 	@ExceptionHandler(Exception.class)
 	ResponseEntity<ProblemDetail> handleUnexpected(Exception exception, HttpServletRequest request) {
+		LOGGER.error("Unexpected error method={} path={} exception={} message={}",
+				request.getMethod(), request.getRequestURI(),
+				exception.getClass().getName(), exception.getMessage(), exception);
 		return build(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "Internal Server Error",
 				"Se ha producido un error inesperado.", request, Map.of());
 	}
@@ -108,5 +132,13 @@ public class GlobalExceptionHandler {
 			problem.setProperty("fieldErrors", fieldErrors);
 		}
 		return ResponseEntity.status(status).body(problem);
+	}
+
+	private static String rootCauseMessage(Throwable throwable) {
+		Throwable current = throwable;
+		while (current.getCause() != null) {
+			current = current.getCause();
+		}
+		return current.getClass().getSimpleName() + ": " + current.getMessage();
 	}
 }
