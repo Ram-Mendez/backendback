@@ -1,5 +1,6 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { finalize } from 'rxjs';
@@ -14,10 +15,11 @@ import { AuthService } from '../../core/auth/auth.service';
   templateUrl: './login.component.html',
   styleUrl: './login.component.css'
 })
-export class LoginComponent {
+export class LoginComponent implements OnInit {
   private readonly authService = inject(AuthService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly loading = signal(false);
   readonly errorMessage = signal<string | null>(null);
@@ -32,7 +34,17 @@ export class LoginComponent {
     })
   });
 
+  ngOnInit(): void {
+    this.form.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.errorMessage.set(null));
+  }
+
   submit(): void {
+    if (this.loading()) {
+      return;
+    }
+
     if (this.form.invalid) {
       this.form.markAllAsTouched();
       return;
@@ -72,7 +84,7 @@ export class LoginComponent {
       case 'CREDENTIALS_EXPIRED':
         return 'Las credenciales han expirado.';
       default:
-        return apiError?.message ?? 'No se ha podido iniciar sesion.';
+        return apiError?.detail ?? apiError?.message ?? error.message ?? 'No se ha podido iniciar sesion.';
     }
   }
 }

@@ -1,31 +1,57 @@
-export type ClaimStatus = 'DRAFT' | 'IN_REVIEW' | 'PENDING' | 'APPROVED' | 'REJECTED';
+export type ClaimStatus =
+  | 'DRAFT'
+  | 'REGISTERED'
+  | 'UNDER_REVIEW'
+  | 'PENDING_CORRECTION'
+  | 'ACCEPTED'
+  | 'REJECTED'
+  | 'INADMISSIBLE';
 
-export interface Claim {
+export interface ClaimSummary {
   id: number;
-  claimant: string;
-  provider: string;
-  invoiceNumber: string;
-  amount: number;
+  reference: string;
+  title: string;
   status: ClaimStatus;
-  description: string | null;
+  createdById: number;
+  createdByUsername: string;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface ClaimRequest {
-  claimant: string;
-  provider: string;
-  invoiceNumber: string;
-  amount: number;
+export interface ClaimDetail {
+  id: number;
+  reference: string;
+  title: string;
+  description: string;
   status: ClaimStatus;
-  description: string | null;
+  claimantName: string | null;
+  createdById: number;
+  createdByUsername: string;
+  updatedById: number | null;
+  updatedByUsername: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface CreateClaimRequest {
+  title: string;
+  description: string;
+  claimantName: string | null;
+}
+
+export interface UpdateClaimRequest {
+  title: string;
+  description: string;
+  claimantName: string | null;
+  version: number;
 }
 
 export interface ClaimFilters {
-  claimant?: string | null;
-  provider?: string | null;
-  invoiceNumber?: string | null;
+  search?: string | null;
   status?: ClaimStatus | '' | null;
+  reference?: string | null;
+  createdBy?: string | null;
   createdFrom?: string | null;
   createdTo?: string | null;
   page?: number;
@@ -35,10 +61,10 @@ export interface ClaimFilters {
 
 export interface PageResponse<T> {
   content: T[];
+  page: number;
+  size: number;
   totalElements: number;
   totalPages: number;
-  size: number;
-  number: number;
   first: boolean;
   last: boolean;
 }

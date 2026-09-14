@@ -25,10 +25,12 @@ export interface AuthTokenResponse {
 }
 
 export interface ApiErrorResponse {
+  type?: string;
+  title?: string;
   status: number;
-  error: string;
   code: string;
-  message: string;
-  path: string;
-  fieldErrors: Record<string, string>;
+  detail?: string;
+  message?: string;
+  instance?: string;
+  fieldErrors?: Record<string, string>;
 }

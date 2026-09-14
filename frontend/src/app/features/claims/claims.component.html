@@ -1,12 +1,14 @@
 <main class="app-shell">
-  <aside class="sidebar">
+  <aside class="sidebar" aria-label="Navegación principal">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">RAM</span>
       <span>IDD Admin</span>
     </div>
+
     <nav aria-label="Principal">
-      <a class="active">Reclamaciones</a>
+      <span class="nav-link active" aria-current="page">Reclamaciones</span>
     </nav>
+
     <div class="session">
       <span>{{ currentUser()?.username }}</span>
       <small>{{ currentUser()?.email }}</small>
@@ -15,92 +17,213 @@
   </aside>
 
   <section class="workspace">
-    <header class="topbar">
-      <div>
+    <header class="page-header">
+      <div class="page-title">
+        <span class="eyebrow">Módulo administrativo</span>
         <h1>Reclamaciones</h1>
-        <p>{{ totalElements() }} registros</p>
+        <div class="header-meta" aria-label="Resumen del listado">
+          <span>{{ totalElements() }} registros</span>
+          <span>{{ appliedFilterCount() }} filtros activos</span>
+        </div>
       </div>
+
       @if (canCreate()) {
-        <button class="primary-button" type="button" (click)="openCreate()">Nueva reclamacion</button>
+        <button class="primary-button" type="button" (click)="openCreate()">Nueva reclamación</button>
       }
     </header>
 
-    <section class="filters" [formGroup]="filtersForm" aria-label="Filtros">
-      <label>
-        Reclamante
-        <input type="search" formControlName="claimant" placeholder="Buscar reclamante">
-      </label>
-      <label>
-        Proveedor
-        <input type="search" formControlName="provider" placeholder="Proveedor">
-      </label>
-      <label>
-        Nº factura
-        <input type="search" formControlName="invoiceNumber" placeholder="Factura">
-      </label>
-      <label>
-        Estado
-        <select formControlName="status">
-          <option value="">Todos</option>
-          @for (status of statuses; track status) {
-            <option [value]="status">{{ labelFor(status) }}</option>
-          }
-        </select>
-      </label>
-      <label>
-        Desde
-        <input type="date" formControlName="createdFrom">
-      </label>
-      <label>
-        Hasta
-        <input type="date" formControlName="createdTo">
-      </label>
-      <button class="secondary-button" type="button" (click)="clearFilters()">Limpiar</button>
-    </section>
+    <form class="filters" [formGroup]="filtersForm" (submit)="$event.preventDefault()" aria-label="Filtros de reclamaciones">
+      <div class="filters-header">
+        <div>
+          <h2>Filtros</h2>
+          <p>{{ appliedFilterCount() }} criterios activos</p>
+        </div>
+        @if (loading() && hasClaims()) {
+          <span class="loading-pill" aria-live="polite">Actualizando...</span>
+        }
+      </div>
 
-    @if (errorMessage()) {
-      <div class="alert" role="alert">{{ errorMessage() }}</div>
+      <div class="filter-grid">
+        <label class="field field-wide" for="filter-search">
+          Búsqueda general
+          <input id="filter-search" type="search" formControlName="search" placeholder="Título, descripción o reclamante">
+        </label>
+
+        <label class="field" for="filter-reference">
+          Referencia
+          <input id="filter-reference" type="search" formControlName="reference" placeholder="CLM-2026-000001">
+        </label>
+
+        <label class="field" for="filter-created-by">
+          Creado por
+          <input id="filter-created-by" type="search" formControlName="createdBy" placeholder="Usuario">
+        </label>
+
+        <label class="field" for="filter-status">
+          Estado
+          <select id="filter-status" formControlName="status">
+            <option value="">Todos</option>
+            @for (status of statuses; track status) {
+              <option [value]="status">{{ labelFor(status) }}</option>
+            }
+          </select>
+        </label>
+
+        <label class="field" for="filter-created-from">
+          Desde
+          <input id="filter-created-from" type="date" formControlName="createdFrom">
+        </label>
+
+        <label class="field" for="filter-created-to">
+          Hasta
+          <input id="filter-created-to" type="date" formControlName="createdTo">
+        </label>
+      </div>
+
+      <div class="filter-actions">
+        <button class="secondary-button compact" type="button" (click)="clearFilters()">Limpiar filtros</button>
+        <button class="ghost-button compact" type="button" (click)="resetState()">Restablecer</button>
+      </div>
+    </form>
+
+    @if (errorMessage() && hasClaims()) {
+      <div class="alert" role="alert">
+        <span>{{ errorMessage() }}</span>
+        <button type="button" (click)="retryLoad()">Reintentar</button>
+      </div>
     }
 
-    <section class="table-panel" aria-live="polite">
-      @if (loading()) {
-        <div class="state">Cargando reclamaciones...</div>
-      } @else if (claims().length === 0) {
-        <div class="state">No hay reclamaciones con los filtros actuales.</div>
-      } @else {
+    <section class="table-panel" aria-labelledby="claims-table-title" [attr.aria-busy]="loading()">
+      <div class="table-panel-header">
+        <div>
+          <h2 id="claims-table-title">Listado de reclamaciones</h2>
+          <p>
+            @if (totalElements() > 0) {
+              {{ pageStart() }}-{{ pageEnd() }} de {{ totalElements() }}
+            } @else {
+              Sin registros
+            }
+          </p>
+        </div>
+      </div>
+
+      @if (isInitialLoading()) {
         <div class="table-scroll">
-          <table>
+          <table class="skeleton-table" aria-hidden="true">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Reclamante</th>
-                <th>Proveedor</th>
-                <th>Nº factura</th>
-                <th>Importe</th>
-                <th>Fecha</th>
+                <th>Referencia</th>
+                <th>Título</th>
                 <th>Estado</th>
+                <th>Creado por</th>
+                <th>Fecha creación</th>
+                <th>Última actualización</th>
                 <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
-              @for (claim of claims(); track claim.id) {
+              @for (row of skeletonRows; track row) {
                 <tr>
-                  <td>{{ claim.id }}</td>
-                  <td>{{ claim.claimant }}</td>
-                  <td>{{ claim.provider }}</td>
-                  <td>{{ claim.invoiceNumber }}</td>
-                  <td>{{ claim.amount | number:'1.2-2' }} EUR</td>
-                  <td>{{ claim.createdAt | date:'dd/MM/yyyy' }}</td>
+                  <td><span class="skeleton-line medium"></span></td>
                   <td>
-                    <span class="status" [class]="claim.status.toLowerCase()">{{ labelFor(claim.status) }}</span>
+                    <span class="skeleton-line wide"></span>
+                    <span class="skeleton-line medium"></span>
+                  </td>
+                  <td><span class="skeleton-pill"></span></td>
+                  <td><span class="skeleton-line medium"></span></td>
+                  <td><span class="skeleton-line short"></span></td>
+                  <td><span class="skeleton-line short"></span></td>
+                  <td><span class="skeleton-actions"></span></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else if (errorMessage() && !hasClaims()) {
+        <div class="state state-error" role="alert">
+          <span class="state-icon" aria-hidden="true">!</span>
+          <h2>Error al cargar</h2>
+          <p>{{ errorMessage() }}</p>
+          <div class="state-actions">
+            <button class="primary-button compact" type="button" (click)="retryLoad()">Reintentar</button>
+            <button class="secondary-button compact" type="button" (click)="resetState()">Restablecer</button>
+          </div>
+        </div>
+      } @else if (!hasClaims()) {
+        <div class="state">
+          <span class="state-icon" aria-hidden="true">0</span>
+          <h2>Sin reclamaciones</h2>
+          @if (appliedFilterCount() > 0) {
+            <p>No hay resultados con los filtros aplicados.</p>
+            <button class="secondary-button compact" type="button" (click)="clearFilters()">Limpiar filtros</button>
+          } @else {
+            <p>Todavía no existen reclamaciones registradas.</p>
+            @if (canCreate()) {
+              <button class="primary-button compact" type="button" (click)="openCreate()">Nueva reclamación</button>
+            }
+          }
+        </div>
+      } @else {
+        <div class="table-scroll">
+          <table>
+            <caption class="sr-only">Listado paginado de reclamaciones</caption>
+            <thead>
+              <tr>
+                <th scope="col">Referencia</th>
+                <th scope="col">Título</th>
+                <th scope="col">Estado</th>
+                <th scope="col">Creado por</th>
+                <th scope="col">Fecha creación</th>
+                <th scope="col">Última actualización</th>
+                <th scope="col" class="actions-column">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (claim of claims(); track claim.id) {
+                <tr
+                  tabindex="0"
+                  role="button"
+                  [class.selected]="isSelected(claim.id)"
+                  [attr.aria-selected]="isSelected(claim.id)"
+                  [attr.aria-label]="'Abrir detalle de ' + claim.reference"
+                  (click)="openDetail(claim)"
+                  (keydown)="handleRowKeydown($event, claim)">
+                  <td>
+                    <strong class="claim-reference">{{ claim.reference }}</strong>
+                  </td>
+                  <td>
+                    <strong class="claim-title">{{ claim.title }}</strong>
+                  </td>
+                  <td>
+                    <span [class]="statusClass(claim.status)">
+                      <span class="status-dot" aria-hidden="true"></span>
+                      {{ labelFor(claim.status) }}
+                    </span>
+                  </td>
+                  <td>
+                    <div class="stacked-cell">
+                      <strong>{{ claim.createdByUsername }}</strong>
+                      <span>ID {{ claim.createdById }}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="stacked-cell date-cell">
+                      <time [attr.datetime]="claim.createdAt">{{ claim.createdAt | date:'dd/MM/yyyy' }}</time>
+                      <span>{{ claim.createdAt | date:'HH:mm' }}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="stacked-cell date-cell">
+                      <time [attr.datetime]="claim.updatedAt">{{ claim.updatedAt | date:'dd/MM/yyyy' }}</time>
+                      <span>{{ claim.updatedAt | date:'HH:mm' }}</span>
+                    </div>
                   </td>
                   <td>
                     <div class="actions">
-                      @if (canEdit()) {
-                        <button class="link-button" type="button" (click)="openEdit(claim)">Editar</button>
-                      }
-                      @if (canDelete()) {
-                        <button class="danger-button" type="button" (click)="deleteClaim(claim)">Eliminar</button>
+                      @if (canEditClaim(claim)) {
+                        <button class="link-button" type="button" (click)="$event.stopPropagation(); openEdit(claim)" [disabled]="saving() || detailLoading()">
+                          Editar
+                        </button>
                       }
                     </div>
                   </td>
@@ -112,68 +235,236 @@
       }
     </section>
 
-    <footer class="pagination">
-      <button type="button" (click)="previousPage()" [disabled]="pageNumber() === 0">Anterior</button>
-      <span>Pagina {{ pageNumber() + 1 }} de {{ totalPages() || 1 }}</span>
-      <button type="button" (click)="nextPage()" [disabled]="pageNumber() + 1 >= totalPages()">Siguiente</button>
-    </footer>
-  </section>
-
-  @if (formMode() !== 'closed') {
-    <section class="editor" aria-labelledby="claim-form-title">
-      <div class="editor-header">
-        <h2 id="claim-form-title">
-          {{ formMode() === 'create' ? 'Nueva reclamacion' : 'Editar reclamacion' }}
-        </h2>
-        <button class="icon-button" type="button" (click)="closeForm()" aria-label="Cerrar">x</button>
-      </div>
-
-      <form [formGroup]="claimForm" (ngSubmit)="submitClaim()" novalidate>
-        <label>
-          Reclamante
-          <input type="text" formControlName="claimant" [class.invalid]="claimForm.controls.claimant.touched && claimForm.controls.claimant.invalid">
-        </label>
-
-        <label>
-          Proveedor
-          <input type="text" formControlName="provider" [class.invalid]="claimForm.controls.provider.touched && claimForm.controls.provider.invalid">
-        </label>
-
-        <label>
-          Nº factura
-          <input type="text" formControlName="invoiceNumber" [class.invalid]="claimForm.controls.invoiceNumber.touched && claimForm.controls.invoiceNumber.invalid">
-        </label>
-
-        <label>
-          Importe
-          <input type="number" min="0" step="0.01" formControlName="amount" [class.invalid]="claimForm.controls.amount.touched && claimForm.controls.amount.invalid">
-        </label>
-
-        <label>
-          Estado
-          <select formControlName="status">
-            @for (status of statuses; track status) {
-              <option [value]="status">{{ labelFor(status) }}</option>
+    <footer class="pagination" aria-label="Paginación">
+      <div class="pagination-summary">
+        <span>Mostrando {{ pageStart() }}-{{ pageEnd() }} de {{ totalElements() }}</span>
+        <span>Página {{ pageNumber() + 1 }} de {{ totalPages() || 1 }}</span>
+        <label for="page-size">
+          Filas
+          <select id="page-size" [value]="pageSize()" (change)="changePageSizeValue($event)" [disabled]="loading()">
+            @for (size of pageSizeOptions; track size) {
+              <option [value]="size">{{ size }}</option>
             }
           </select>
         </label>
+      </div>
 
-        <label>
-          Descripcion
-          <textarea rows="5" formControlName="description"></textarea>
-        </label>
+      <div class="pagination-actions">
+        <button type="button" (click)="previousPage()" [disabled]="!canGoPrevious()">Anterior</button>
+        <button type="button" (click)="nextPage()" [disabled]="!canGoNext()">Siguiente</button>
+      </div>
+    </footer>
+  </section>
 
-        @if (formErrorMessage()) {
-          <div class="alert" role="alert">{{ formErrorMessage() }}</div>
-        }
-
-        <div class="form-actions">
-          <button class="secondary-button" type="button" (click)="closeForm()">Cancelar</button>
-          <button class="primary-button" type="submit" [disabled]="saving()">
-            {{ saving() ? 'Guardando...' : 'Guardar' }}
-          </button>
+  @if (drawerMode() !== 'closed') {
+    <button class="drawer-backdrop" type="button" tabindex="-1" (click)="closeDrawer()" aria-label="Cerrar panel"></button>
+    <section class="drawer" role="dialog" aria-modal="true" aria-labelledby="claim-drawer-title">
+      <div class="drawer-header">
+        <div>
+          <span class="eyebrow">
+            @if (drawerMode() === 'detail') {
+              Detalle
+            } @else if (drawerMode() === 'create') {
+              Alta
+            } @else {
+              Edición
+            }
+          </span>
+          <h2 id="claim-drawer-title">
+            @if (drawerMode() === 'detail') {
+              Detalle de reclamación
+            } @else if (drawerMode() === 'create') {
+              Nueva reclamación
+            } @else {
+              Editar reclamación
+            }
+          </h2>
+          @if (selectedClaimSummary(); as summary) {
+            <p class="drawer-meta">{{ summary.reference }}</p>
+          }
         </div>
-      </form>
+        <button class="icon-button" type="button" (click)="closeDrawer()" aria-label="Cerrar">x</button>
+      </div>
+
+      @if (detailLoading()) {
+        <div class="drawer-loading" aria-live="polite">
+          <span class="skeleton-line wide"></span>
+          <span class="skeleton-line medium"></span>
+          <span class="skeleton-pill"></span>
+          <span class="skeleton-line wide"></span>
+          <span class="skeleton-line wide"></span>
+          <span class="skeleton-line short"></span>
+        </div>
+      } @else if (drawerMode() === 'detail') {
+        @if (detailErrorMessage()) {
+          <div class="state state-error drawer-state" role="alert">
+            <span class="state-icon" aria-hidden="true">!</span>
+            <h2>Error al cargar</h2>
+            <p>{{ detailErrorMessage() }}</p>
+            <div class="state-actions">
+              <button class="primary-button compact" type="button" (click)="retryDrawerLoad()">Reintentar</button>
+              <button class="secondary-button compact" type="button" (click)="closeDrawer()">Cerrar</button>
+            </div>
+          </div>
+        } @else if (selectedClaimDetail(); as detail) {
+          <article class="detail-content">
+            <header class="detail-hero">
+              <div>
+                <span class="claim-reference">{{ detail.reference }}</span>
+                <h3>{{ detail.title }}</h3>
+              </div>
+              <span [class]="statusClass(detail.status)">
+                <span class="status-dot" aria-hidden="true"></span>
+                {{ labelFor(detail.status) }}
+              </span>
+            </header>
+
+            <section class="detail-section" aria-labelledby="claimant-title">
+              <h3 id="claimant-title">Reclamante</h3>
+              <p>{{ detail.claimantName ?? 'Sin reclamante' }}</p>
+            </section>
+
+            <section class="detail-section" aria-labelledby="description-title">
+              <h3 id="description-title">Descripción</h3>
+              <p class="detail-description">{{ detail.description }}</p>
+            </section>
+
+            <dl class="detail-list">
+              <div>
+                <dt>Creado por</dt>
+                <dd>{{ detail.createdByUsername }} · ID {{ detail.createdById }}</dd>
+              </div>
+              <div>
+                <dt>Actualizado por</dt>
+                <dd>{{ detail.updatedByUsername ?? 'Sin actualizar' }}</dd>
+              </div>
+              <div>
+                <dt>Fecha creación</dt>
+                <dd><time [attr.datetime]="detail.createdAt">{{ detail.createdAt | date:'dd/MM/yyyy HH:mm' }}</time></dd>
+              </div>
+              <div>
+                <dt>Última actualización</dt>
+                <dd><time [attr.datetime]="detail.updatedAt">{{ detail.updatedAt | date:'dd/MM/yyyy HH:mm' }}</time></dd>
+              </div>
+              <div>
+                <dt>Versión</dt>
+                <dd>{{ detail.version }}</dd>
+              </div>
+            </dl>
+
+            @if (canEditClaim(detail)) {
+              <div class="form-actions">
+                <button class="secondary-button" type="button" (click)="openSelectedDetailForEdit()">Editar</button>
+              </div>
+            }
+          </article>
+        }
+      } @else if (drawerMode() === 'edit' && selectedClaimDetail() === null) {
+        <div class="state state-error drawer-state" role="alert">
+          <span class="state-icon" aria-hidden="true">!</span>
+          <h2>Error al cargar</h2>
+          @if (formErrorMessage()) {
+            <p>{{ formErrorMessage() }}</p>
+          }
+          <div class="state-actions">
+            <button class="primary-button compact" type="button" (click)="retryDrawerLoad()">Reintentar</button>
+            <button class="secondary-button compact" type="button" (click)="closeDrawer()">Cerrar</button>
+          </div>
+        </div>
+      } @else {
+        <form [formGroup]="claimForm" (ngSubmit)="submitClaim()" [attr.aria-busy]="formBusy()" novalidate>
+          <div class="field">
+            <label for="title">Título</label>
+            <input
+              id="title"
+              type="text"
+              formControlName="title"
+              aria-describedby="title-error"
+              [attr.aria-invalid]="claimForm.controls.title.touched && claimForm.controls.title.invalid"
+              [class.invalid]="claimForm.controls.title.touched && claimForm.controls.title.invalid">
+            <div id="title-error" class="field-error-slot" aria-live="polite">
+              @if (claimForm.controls.title.touched && claimForm.controls.title.hasError('required')) {
+                <p class="field-error">El título es obligatorio.</p>
+              }
+              @if (claimForm.controls.title.touched && claimForm.controls.title.hasError('maxlength')) {
+                <p class="field-error">Máximo 200 caracteres.</p>
+              }
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="claimant-name">Nombre del reclamante</label>
+            <input
+              id="claimant-name"
+              type="text"
+              formControlName="claimantName"
+              aria-describedby="claimant-name-error"
+              [attr.aria-invalid]="claimForm.controls.claimantName.touched && claimForm.controls.claimantName.invalid"
+              [class.invalid]="claimForm.controls.claimantName.touched && claimForm.controls.claimantName.invalid">
+            <div id="claimant-name-error" class="field-error-slot" aria-live="polite">
+              @if (claimForm.controls.claimantName.touched && claimForm.controls.claimantName.hasError('maxlength')) {
+                <p class="field-error">Máximo 160 caracteres.</p>
+              }
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="description">Descripción</label>
+            <textarea
+              id="description"
+              rows="5"
+              formControlName="description"
+              aria-describedby="description-help description-error"
+              [attr.aria-invalid]="claimForm.controls.description.touched && claimForm.controls.description.invalid"
+              [class.invalid]="claimForm.controls.description.touched && claimForm.controls.description.invalid"></textarea>
+            <div class="textarea-meta">
+              <span id="description-help">Obligatoria</span>
+              <span>{{ claimForm.controls.description.value.length }}/4000</span>
+            </div>
+            <div id="description-error" class="field-error-slot" aria-live="polite">
+              @if (claimForm.controls.description.touched && claimForm.controls.description.hasError('required')) {
+                <p class="field-error">La descripción es obligatoria.</p>
+              }
+              @if (claimForm.controls.description.touched && claimForm.controls.description.hasError('maxlength')) {
+                <p class="field-error">Máximo 4000 caracteres.</p>
+              }
+            </div>
+          </div>
+
+          @if (drawerMode() === 'edit' && selectedClaimDetail(); as detail) {
+            @if (canChangeStatus(detail)) {
+            <section class="status-editor" aria-labelledby="status-editor-title">
+              <div>
+                <h3 id="status-editor-title">Estado</h3>
+                <p>Se actualiza mediante PATCH independiente.</p>
+              </div>
+              <div class="status-editor-controls">
+                <label class="sr-only" for="claim-status">Estado</label>
+                <select id="claim-status" [formControl]="statusControl" [disabled]="statusSaving()">
+                  @for (status of statusOptionsFor(detail); track status) {
+                    <option [value]="status">{{ labelFor(status) }}</option>
+                  }
+                </select>
+                <button class="secondary-button compact" type="button" (click)="updateStatus()" [disabled]="statusSaving() || !hasPendingStatusChange()">
+                  {{ statusSaving() ? 'Actualizando...' : 'Actualizar estado' }}
+                </button>
+              </div>
+            </section>
+            }
+          }
+
+          @if (formErrorMessage()) {
+            <div class="alert drawer-alert" role="alert">{{ formErrorMessage() }}</div>
+          }
+
+          <div class="form-actions">
+            <button class="secondary-button" type="button" (click)="closeDrawer()" [disabled]="saving()">Cancelar</button>
+            <button class="primary-button" type="submit" [disabled]="formBusy()">
+              {{ saving() ? 'Guardando...' : 'Guardar' }}
+            </button>
+          </div>
+        </form>
+      }
     </section>
   }
 </main>
