@@ -72,7 +72,8 @@
             "styles": [
               "src/styles.css"
             ],
-            "browsers": "ChromeHeadless",
+            "karmaConfig": "karma.conf.js",
+            "browsers": "ChromeHeadlessNoSandbox",
             "reporters": [
               "progress"
             ]
