@@ -14,6 +14,7 @@ import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.Set;
 
+import com.mendez.ram.claim.dto.ChangeClaimStatusRequest;
 import com.mendez.ram.claim.dto.CreateClaimRequest;
 import com.mendez.ram.claim.dto.UpdateClaimRequest;
 import com.mendez.ram.claim.entity.Claim;
@@ -88,7 +89,8 @@ class ClaimServiceTest {
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
 		when(authUserRepository.findById(1L)).thenReturn(Optional.of(actor));
 
-		var response = claimService.changeStatus(10L, ClaimStatus.REGISTERED, principal);
+		var response = claimService.changeStatus(10L,
+				new ChangeClaimStatusRequest(ClaimStatus.REGISTERED, 0L), principal);
 
 		assertThat(response.status()).isEqualTo(ClaimStatus.REGISTERED);
 		verify(claimRepository).flush();
@@ -103,7 +105,8 @@ class ClaimServiceTest {
 		Claim claim = new Claim("Draft", "Description", null, actor, NOW);
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
 
-		assertThatThrownBy(() -> claimService.changeStatus(10L, ClaimStatus.ACCEPTED, principal))
+		assertThatThrownBy(() -> claimService.changeStatus(10L,
+				new ChangeClaimStatusRequest(ClaimStatus.ACCEPTED, 0L), principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.CONFLICT));
 	}
@@ -126,7 +129,7 @@ class ClaimServiceTest {
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
 
 		assertThatThrownBy(() -> claimService.update(10L,
-				new UpdateClaimRequest("New title", "New description", null), principal))
+				new UpdateClaimRequest("New title", "New description", null, 0L), principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
 	}
@@ -143,7 +146,7 @@ class ClaimServiceTest {
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
 
 		assertThatThrownBy(() -> claimService.update(10L,
-				new UpdateClaimRequest("New title", "New description", null), principal))
+				new UpdateClaimRequest("New title", "New description", null, 0L), principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.CONFLICT));
 	}

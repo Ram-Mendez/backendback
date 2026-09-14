@@ -77,6 +77,7 @@ public class ClaimController {
 			@RequestParam(defaultValue = "" + DEFAULT_SIZE) int size,
 			@RequestParam(defaultValue = "createdAt,desc") String sort,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
+		validateDateRange(createdFrom, createdTo);
 		ClaimSearchCriteria criteria = new ClaimSearchCriteria(
 				search, status, reference, createdBy, createdFrom, createdTo);
 		return claimService.findAll(criteria, pageable(page, size, sort), principal);
@@ -115,7 +116,14 @@ public class ClaimController {
 	@Operation(summary = "Change claim status using the configured lifecycle")
 	public ClaimResponse changeStatus(@PathVariable Long id, @Valid @RequestBody ChangeClaimStatusRequest request,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
-		return claimService.changeStatus(id, request.status(), principal);
+		return claimService.changeStatus(id, request, principal);
+	}
+
+	private static void validateDateRange(LocalDate createdFrom, LocalDate createdTo) {
+		if (createdFrom != null && createdTo != null && createdFrom.isAfter(createdTo)) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_DATE_RANGE",
+					"createdFrom debe ser anterior o igual a createdTo.");
+		}
 	}
 
 	private Pageable pageable(int page, int size, String sort) {

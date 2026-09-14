@@ -6,6 +6,7 @@ import java.time.Instant;
 import com.mendez.ram.claim.dto.ClaimResponse;
 import com.mendez.ram.claim.dto.ClaimSearchCriteria;
 import com.mendez.ram.claim.dto.ClaimSummaryResponse;
+import com.mendez.ram.claim.dto.ChangeClaimStatusRequest;
 import com.mendez.ram.claim.dto.CreateClaimRequest;
 import com.mendez.ram.claim.dto.PageResponse;
 import com.mendez.ram.claim.dto.UpdateClaimRequest;
@@ -82,6 +83,7 @@ public class ClaimService {
 	public ClaimResponse update(Long id, UpdateClaimRequest request, AuthenticatedUser principal) {
 		Claim claim = findClaim(id);
 		ensureCanUpdate(claim, principal);
+		ensureExpectedVersion(claim, request.version());
 		AuthUser actor = findActor(principal);
 		claimMapper.updateEntity(claim, request, actor, Instant.now(clock));
 		claimRepository.flush();
@@ -90,9 +92,11 @@ public class ClaimService {
 	}
 
 	@Transactional
-	public ClaimResponse changeStatus(Long id, ClaimStatus targetStatus, AuthenticatedUser principal) {
+	public ClaimResponse changeStatus(Long id, ChangeClaimStatusRequest request, AuthenticatedUser principal) {
 		Claim claim = findClaim(id);
 		ensureCanView(claim, principal);
+		ensureExpectedVersion(claim, request.version());
+		ClaimStatus targetStatus = request.status();
 		ClaimStatus previousStatus = claim.getStatus();
 		if (!previousStatus.canTransitionTo(targetStatus)) {
 			throw new ApiException(HttpStatus.CONFLICT, "INVALID_CLAIM_STATUS_TRANSITION",
@@ -119,6 +123,14 @@ public class ClaimService {
 		return authUserRepository.findById(principal.id())
 				.orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED",
 						"Debes autenticarte para acceder a este recurso."));
+	}
+
+	private static void ensureExpectedVersion(Claim claim, Long expectedVersion) {
+		if (expectedVersion != null && claim.getVersion() == expectedVersion) {
+			return;
+		}
+		throw new ApiException(HttpStatus.CONFLICT, "OPTIMISTIC_LOCK_CONFLICT",
+				"La reclamacion fue modificada por otro proceso. Recarga los datos e intentalo de nuevo.");
 	}
 
 	private void ensureCanView(Claim claim, AuthenticatedUser principal) {

@@ -96,7 +96,7 @@ class ClaimControllerTest {
 		mockMvc.perform(put("/api/v1/claims/10")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"title":"Updated title","description":"Updated description"}
+								{"title":"Updated title","description":"Updated description","version":0}
 								"""))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").value(10));
@@ -104,13 +104,13 @@ class ClaimControllerTest {
 
 	@Test
 	void patchChangesStatus() throws Exception {
-		when(claimService.changeStatus(eq(10L), eq(ClaimStatus.REGISTERED), any()))
+		when(claimService.changeStatus(eq(10L), any(), any()))
 				.thenReturn(response(10L, "CLM-2026-000010", ClaimStatus.REGISTERED));
 
 		mockMvc.perform(patch("/api/v1/claims/10/status")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"status":"REGISTERED"}
+								{"status":"REGISTERED","version":0}
 								"""))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.status").value("REGISTERED"));

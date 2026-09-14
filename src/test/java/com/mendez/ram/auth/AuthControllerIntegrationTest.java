@@ -21,6 +21,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import tools.jackson.databind.ObjectMapper;
 
@@ -43,6 +44,9 @@ class AuthControllerIntegrationTest {
 	@Autowired
 	private TokenHashingService tokenHashingService;
 
+	@Autowired
+	private TransactionTemplate transactionTemplate;
+
 	@Test
 	void loginUsesExistingAuthUserAndStoresOnlyRefreshTokenHash() throws Exception {
 		MvcResult result = login("admin@local.dev", "DevAdmin123!")
@@ -56,11 +60,13 @@ class AuthControllerIntegrationTest {
 
 		AuthTokenResponse response = objectMapper.readValue(result.getResponse().getContentAsString(),
 				AuthTokenResponse.class);
-		assertThat(refreshTokenRepository
-				.findByTokenHashAndRevokedAtIsNull(tokenHashingService.sha256Hex(response.refreshToken())))
-				.isPresent();
-		assertThat(refreshTokenRepository.findByTokenHashAndRevokedAtIsNull(response.refreshToken()))
-				.isEmpty();
+		transactionTemplate.executeWithoutResult(status -> {
+			assertThat(refreshTokenRepository
+					.findByTokenHashAndRevokedAtIsNull(tokenHashingService.sha256Hex(response.refreshToken())))
+					.isPresent();
+			assertThat(refreshTokenRepository.findByTokenHashAndRevokedAtIsNull(response.refreshToken()))
+					.isEmpty();
+		});
 	}
 
 	@Test

@@ -91,8 +91,7 @@ public class JwtService {
 			throw new JwtValidationException("JWT is expired");
 		}
 
-		return new JwtClaims(Long.valueOf(String.valueOf(payload.get("sub"))),
-				String.valueOf(payload.get("email")), expiresAt);
+		return new JwtClaims(asUserId(payload.get("sub")), String.valueOf(payload.get("email")), expiresAt);
 	}
 
 	private String encodeJson(Map<String, Object> value) {
@@ -131,6 +130,18 @@ public class JwtService {
 			return number.longValue();
 		}
 		throw new JwtValidationException("JWT claim is missing or invalid: " + fieldName);
+	}
+
+	private static Long asUserId(Object value) {
+		if (value == null) {
+			throw new JwtValidationException("JWT claim is missing or invalid: sub");
+		}
+		try {
+			return Long.valueOf(String.valueOf(value));
+		}
+		catch (NumberFormatException exception) {
+			throw new JwtValidationException("JWT claim is missing or invalid: sub", exception);
+		}
 	}
 
 	private static List<String> roleCodes(AuthUser user) {
