@@ -352,6 +352,8 @@
               </div>
             </dl>
 
+            <app-claim-attachments [claimId]="detail.id" [editable]="canEditClaim(detail)"></app-claim-attachments>
+
             @if (canEditClaim(detail)) {
               <div class="form-actions">
                 <button class="secondary-button" type="button" (click)="openSelectedDetailForEdit()">Editar</button>
@@ -451,6 +453,8 @@
               </div>
             </section>
             }
+
+            <app-claim-attachments [claimId]="detail.id" [editable]="canEditClaim(detail)"></app-claim-attachments>
           }
 
           @if (formErrorMessage()) {

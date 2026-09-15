@@ -112,8 +112,35 @@ public class ClaimService {
 		return claimMapper.toResponse(claim);
 	}
 
+	@Transactional(readOnly = true)
+	public Claim requireViewableClaim(Long id, AuthenticatedUser principal) {
+		Claim claim = findClaim(id);
+		ensureCanView(claim, principal);
+		return claim;
+	}
+
+	@Transactional(readOnly = true)
+	public Claim requireEditableClaim(Long id, AuthenticatedUser principal) {
+		Claim claim = findClaim(id);
+		ensureCanUpdate(claim, principal);
+		return claim;
+	}
+
+	@Transactional
+	public Claim requireEditableClaimLocked(Long id, AuthenticatedUser principal) {
+		Claim claim = findLockedClaim(id);
+		ensureCanUpdate(claim, principal);
+		return claim;
+	}
+
 	private Claim findClaim(Long id) {
 		return claimRepository.findWithUsersById(id)
+				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "CLAIM_NOT_FOUND",
+						"No existe la reclamacion solicitada."));
+	}
+
+	private Claim findLockedClaim(Long id) {
+		return claimRepository.findLockedWithUsersById(id)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "CLAIM_NOT_FOUND",
 						"No existe la reclamacion solicitada."));
 	}

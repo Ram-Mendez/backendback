@@ -18,9 +18,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -84,6 +88,27 @@ public class GlobalExceptionHandler {
 				"Parametro de solicitud no valido: " + exception.getName() + ".", request, Map.of());
 	}
 
+	@ExceptionHandler(MissingServletRequestParameterException.class)
+	ResponseEntity<ProblemDetail> handleMissingParameter(MissingServletRequestParameterException exception,
+			HttpServletRequest request) {
+		LOGGER.warn("Missing request parameter method={} path={} parameter={}",
+				request.getMethod(), request.getRequestURI(), exception.getParameterName());
+		return build(HttpStatus.BAD_REQUEST, "INVALID_REQUEST_PARAMETER", "Bad Request",
+				"Parametro de solicitud requerido ausente: " + exception.getParameterName() + ".", request, Map.of());
+	}
+
+	@ExceptionHandler(MissingServletRequestPartException.class)
+	ResponseEntity<ProblemDetail> handleMissingPart(MissingServletRequestPartException exception,
+			HttpServletRequest request) {
+		LOGGER.warn("Missing multipart part method={} path={} part={}",
+				request.getMethod(), request.getRequestURI(), exception.getRequestPartName());
+		String code = "files".equals(exception.getRequestPartName()) ? "ATTACHMENT_REQUIRED" : "MISSING_MULTIPART_PART";
+		String detail = "files".equals(exception.getRequestPartName())
+				? "Debes adjuntar al menos un archivo."
+				: "Falta una parte multipart requerida: " + exception.getRequestPartName() + ".";
+		return build(HttpStatus.BAD_REQUEST, code, "Bad Request", detail, request, Map.of());
+	}
+
 	@ExceptionHandler(AccessDeniedException.class)
 	ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException exception, HttpServletRequest request) {
 		LOGGER.warn("Access denied method={} path={} message={}",
@@ -109,6 +134,23 @@ public class GlobalExceptionHandler {
 				request.getMethod(), request.getRequestURI(), rootCauseMessage(exception), exception);
 		return build(HttpStatus.CONFLICT, "DATA_INTEGRITY_CONFLICT", "Conflict",
 				"La operacion entra en conflicto con los datos existentes.", request, Map.of());
+	}
+
+	@ExceptionHandler(MaxUploadSizeExceededException.class)
+	ResponseEntity<ProblemDetail> handleMaxUploadSize(MaxUploadSizeExceededException exception,
+			HttpServletRequest request) {
+		LOGGER.warn("Multipart upload too large method={} path={} message={}",
+				request.getMethod(), request.getRequestURI(), exception.getMessage());
+		return build(HttpStatus.PAYLOAD_TOO_LARGE, "ATTACHMENT_FILE_TOO_LARGE", "Payload Too Large",
+				"El archivo adjunto supera el tamano maximo permitido.", request, Map.of());
+	}
+
+	@ExceptionHandler(MultipartException.class)
+	ResponseEntity<ProblemDetail> handleMultipart(MultipartException exception, HttpServletRequest request) {
+		LOGGER.warn("Malformed multipart request method={} path={} cause={}",
+				request.getMethod(), request.getRequestURI(), rootCauseMessage(exception));
+		return build(HttpStatus.BAD_REQUEST, "MALFORMED_MULTIPART_REQUEST", "Bad Request",
+				"La solicitud multipart no es valida.", request, Map.of());
 	}
 
 	@ExceptionHandler(Exception.class)

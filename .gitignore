@@ -48,3 +48,4 @@ frontend/dist/
 frontend/.angular/
 target/
 .idea/
+/storage/

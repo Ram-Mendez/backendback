@@ -15,6 +15,7 @@ import {
   UpdateClaimRequest
 } from './claims.models';
 import { ClaimsService } from './claims.service';
+import { ClaimAttachmentsComponent } from './attachments/claim-attachments.component';
 
 type DrawerMode = 'closed' | 'detail' | 'create' | 'edit';
 type DetailLoadMode = 'detail' | 'edit';
@@ -59,7 +60,7 @@ const EMPTY_FILTERS: ClaimFiltersFormValue = {
 @Component({
   selector: 'app-claims',
   standalone: true,
-  imports: [DatePipe, ReactiveFormsModule],
+  imports: [DatePipe, ReactiveFormsModule, ClaimAttachmentsComponent],
   templateUrl: './claims.component.html',
   styleUrl: './claims.component.css'
 })

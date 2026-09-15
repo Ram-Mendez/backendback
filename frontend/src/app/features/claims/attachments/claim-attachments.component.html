@@ -1,0 +1,104 @@
+<section class="attachments-panel" aria-labelledby="claim-attachments-title">
+  <div class="attachments-header">
+    <div>
+      <h3 id="claim-attachments-title">Adjuntos</h3>
+      <p>{{ attachments().length }} archivos guardados</p>
+    </div>
+    @if (loading()) {
+      <span class="attachments-loading" aria-live="polite">Cargando...</span>
+    }
+  </div>
+
+  @if (errorMessage()) {
+    <div class="attachments-alert" role="alert">{{ errorMessage() }}</div>
+  }
+
+  @if (editable) {
+    <div
+      class="dropzone"
+      [class.dropzone-active]="dropActive()"
+      (dragover)="onDragOver($event)"
+      (dragleave)="onDragLeave($event)"
+      (drop)="onDrop($event)">
+      <input #fileInput class="sr-only" type="file" multiple (change)="selectFiles($event)">
+      <input #folderInput class="sr-only" type="file" multiple webkitdirectory (change)="selectFolder($event)">
+      <div>
+        <strong>Arrastra archivos aqui</strong>
+        <span>Tambien puedes seleccionar archivos o una carpeta completa.</span>
+      </div>
+      <div class="dropzone-actions">
+        <button class="secondary-button compact" type="button" (click)="fileInput.click()" [disabled]="uploading()">
+          Seleccionar archivos
+        </button>
+        <button class="secondary-button compact" type="button" (click)="folderInput.click()" [disabled]="uploading()">
+          Seleccionar carpeta
+        </button>
+      </div>
+    </div>
+  } @else {
+    <p class="readonly-note">Los adjuntos solo se pueden modificar mientras la reclamacion sea editable.</p>
+  }
+
+  @if (queuedFiles().length > 0) {
+    <section class="queue" aria-labelledby="attachment-queue-title">
+      <div class="queue-header">
+        <h4 id="attachment-queue-title">Pendientes de envio</h4>
+        <button class="primary-button compact" type="button" (click)="uploadQueuedFiles()" [disabled]="!canStartUpload()">
+          {{ uploading() ? 'Subiendo...' : 'Subir adjuntos' }}
+        </button>
+      </div>
+
+      <ul class="queue-list">
+        @for (item of queuedFiles(); track trackQueuedFile($index, item)) {
+          <li class="queue-item">
+            <div class="file-main">
+              <strong>{{ item.name }}</strong>
+              <span>{{ item.relativePath }}</span>
+              @if (item.errorMessage) {
+                <small>{{ item.errorMessage }}</small>
+              }
+            </div>
+            <span class="file-meta">{{ formatBytes(item.sizeBytes) }}</span>
+            <span class="file-meta">{{ item.contentType }}</span>
+            <span [class]="statusClass(item.status)">{{ statusLabel(item.status) }}</span>
+            <button class="link-button" type="button" (click)="removeQueuedFile(item.id)" [disabled]="item.status === 'uploading'">
+              Quitar
+            </button>
+          </li>
+        }
+      </ul>
+    </section>
+  }
+
+  <section class="attachments-list" aria-label="Adjuntos existentes">
+    @if (loading() && attachments().length === 0) {
+      <div class="attachments-state" aria-live="polite">Cargando adjuntos...</div>
+    } @else if (attachments().length === 0) {
+      <div class="attachments-state">Sin adjuntos.</div>
+    } @else {
+      @for (attachment of attachments(); track trackAttachment($index, attachment)) {
+        <article class="attachment-row">
+          <div class="file-main">
+            <strong>{{ attachment.fileName }}</strong>
+            <span>{{ attachment.relativePath }}</span>
+            <small>
+              {{ formatBytes(attachment.sizeBytes) }} - {{ attachment.contentType }} - {{ attachment.createdByUsername }}
+              <time [attr.datetime]="attachment.createdAt">{{ attachment.createdAt | date:'dd/MM/yyyy HH:mm' }}</time>
+            </small>
+          </div>
+          <div class="attachment-row-actions">
+            <button class="link-button" type="button" (click)="downloadAttachment(attachment)">
+              Descargar
+            </button>
+            @if (editable) {
+              <button class="link-button danger-link" type="button" (click)="deleteAttachment(attachment)" [disabled]="isDeleting(attachment.id)">
+                {{ isDeleting(attachment.id) ? 'Eliminando...' : 'Eliminar' }}
+              </button>
+            }
+          </div>
+        </article>
+      }
+    }
+  </section>
+</section>
+

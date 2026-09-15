@@ -165,6 +165,8 @@ describe('ClaimsComponent', () => {
 
     request.flush(detailResponse());
     fixture.detectChanges();
+    flushAttachments();
+    fixture.detectChanges();
 
     const text = pageText();
     expect(text).toContain('CLM-2026-000001');
@@ -205,6 +207,8 @@ describe('ClaimsComponent', () => {
     expect(retryRequest.request.method).toBe('GET');
     retryRequest.flush(detailResponse());
     fixture.detectChanges();
+    flushAttachments();
+    fixture.detectChanges();
 
     expect(pageText()).toContain('Alba Serrano');
   });
@@ -215,6 +219,8 @@ describe('ClaimsComponent', () => {
 
     clickFirstRow();
     httpMock.expectOne('/api/v1/claims/12').flush(detailResponse());
+    fixture.detectChanges();
+    flushAttachments();
     fixture.detectChanges();
     expect(queryElement('.drawer')).not.toBeNull();
 
@@ -232,6 +238,10 @@ describe('ClaimsComponent', () => {
 
   function expectNoListRequests(): void {
     httpMock.expectNone((request) => request.url === '/api/v1/claims');
+  }
+
+  function flushAttachments(): void {
+    httpMock.expectOne('/api/v1/claims/12/attachments').flush([]);
   }
 
   function queryElement<T extends Element = Element>(selector: string): T | null {

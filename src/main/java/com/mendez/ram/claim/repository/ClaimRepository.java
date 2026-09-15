@@ -3,12 +3,16 @@ package com.mendez.ram.claim.repository;
 import java.util.Optional;
 
 import com.mendez.ram.claim.entity.Claim;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface ClaimRepository extends JpaRepository<Claim, Long>, JpaSpecificationExecutor<Claim> {
 
@@ -18,4 +22,9 @@ public interface ClaimRepository extends JpaRepository<Claim, Long>, JpaSpecific
 
 	@EntityGraph(attributePaths = { "createdBy", "updatedBy" })
 	Optional<Claim> findWithUsersById(Long id);
+
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@EntityGraph(attributePaths = { "createdBy", "updatedBy" })
+	@Query("select claim from Claim claim where claim.id = :id")
+	Optional<Claim> findLockedWithUsersById(@Param("id") Long id);
 }
