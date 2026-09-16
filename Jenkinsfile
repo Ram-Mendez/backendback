@@ -55,9 +55,21 @@ pipeline {
             }
         }
 
+        stage('Package Frontend') {
+            steps {
+                sh '''
+                    rm -f frontend/ram-frontend.zip
+                    jar --create \
+                        --file frontend/ram-frontend.zip \
+                        --no-manifest \
+                        -C frontend/dist/ram-frontend .
+                '''
+            }
+        }
+
         stage('Archive Artifacts') {
             steps {
-                archiveArtifacts artifacts: 'target/*.jar, frontend/dist/**/*',
+                archiveArtifacts artifacts: 'target/*.jar, frontend/ram-frontend.zip',
                                  fingerprint: true
             }
         }
