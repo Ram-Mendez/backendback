@@ -129,6 +129,18 @@
   font-weight: 700;
 }
 
+.queue-header p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 560;
+}
+
+.queue-header .queue-limit {
+  color: var(--danger);
+  font-weight: 680;
+}
+
 .queue-list {
   display: grid;
   gap: var(--space-2);

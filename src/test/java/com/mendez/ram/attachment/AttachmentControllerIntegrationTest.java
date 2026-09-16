@@ -140,6 +140,19 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	@Test
+	void exposesUploadCapabilitiesForBatchingClients() throws Exception {
+		String userToken = accessToken("user@local.dev", "DevUser123!");
+		Long claimId = createClaim(userToken, "Attachments capabilities");
+
+		mockMvc.perform(get("/api/v1/claims/" + claimId + "/attachments/capabilities")
+						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.maxFileSizeBytes").value(1024))
+				.andExpect(jsonPath("$.maxRequestSizeBytes").value(2048))
+				.andExpect(jsonPath("$.maxFilesPerRequest").value(3));
+	}
+
+	@Test
 	void duplicateRelativePathsAreKeptWithStableSuffixes() throws Exception {
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments duplicate path");
@@ -177,7 +190,7 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	@Test
-	void rejectsTraversalTooLargeAndDisallowedTypes() throws Exception {
+	void rejectsTraversalTooLargeAndKnownSignatureMismatch() throws Exception {
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments validation");
 
@@ -192,17 +205,71 @@ class AttachmentControllerIntegrationTest {
 				.andExpect(status().isPayloadTooLarge())
 				.andExpect(jsonPath("$.code").value("ATTACHMENT_FILE_TOO_LARGE"));
 
-		mockMvc.perform(upload(userToken, claimId, new MockMultipartFile("files", "tool.exe", "application/x-msdownload",
-				"binary".getBytes(StandardCharsets.UTF_8)))
-				.param("relativePaths", "tool.exe"))
-				.andExpect(status().isUnsupportedMediaType())
-				.andExpect(jsonPath("$.code").value("ATTACHMENT_TYPE_NOT_ALLOWED"));
-
 		mockMvc.perform(upload(userToken, claimId, new MockMultipartFile("files", "fake.png", "image/png",
 				"not really a png".getBytes(StandardCharsets.UTF_8)))
 				.param("relativePaths", "fake.png"))
 				.andExpect(status().isUnsupportedMediaType())
 				.andExpect(jsonPath("$.code").value("ATTACHMENT_TYPE_NOT_ALLOWED"));
+	}
+
+	@Test
+	void acceptsGenericUnknownFormatWithUnknownExtension() throws Exception {
+		String userToken = accessToken("user@local.dev", "DevUser123!");
+		Long claimId = createClaim(userToken, "Attachments unknown format");
+
+		mockMvc.perform(upload(userToken, claimId,
+				new MockMultipartFile("files", "model.never-seen-before", "application/x-new-format",
+						new byte[] { 0x13, 0x37, 0x42, 0x00, 0x55 }))
+				.param("relativePaths", "design/model.never-seen-before"))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$[0].fileName").value("model.never-seen-before"))
+				.andExpect(jsonPath("$[0].relativePath").value("design/model.never-seen-before"))
+				.andExpect(jsonPath("$[0].contentType").value("application/x-new-format"));
+	}
+
+	@Test
+	void acceptsRealXlsSignatureWithoutRequiringBrowserMimeVariant() throws Exception {
+		String userToken = accessToken("user@local.dev", "DevUser123!");
+		Long claimId = createClaim(userToken, "Attachments xls");
+
+		mockMvc.perform(upload(userToken, claimId,
+				new MockMultipartFile("files", "legacy.xls", "application/x-ole-storage", oleCompoundBytes()))
+				.param("relativePaths", "spreadsheets/legacy.xls"))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$[0].relativePath").value("spreadsheets/legacy.xls"))
+				.andExpect(jsonPath("$[0].contentType").value("application/x-ole-storage"));
+	}
+
+	@Test
+	void acceptsPptxAndGenericBinaryArchiveFormats() throws Exception {
+		String userToken = accessToken("user@local.dev", "DevUser123!");
+		Long claimId = createClaim(userToken, "Attachments office and archives");
+
+		mockMvc.perform(upload(userToken, claimId,
+				new MockMultipartFile("files", "deck.pptx",
+						"application/vnd.openxmlformats-officedocument.presentationml.presentation", zipBytes()),
+				new MockMultipartFile("files", "bundle.7z", "application/octet-stream", sevenZipBytes()))
+				.param("relativePaths", "presentations/deck.pptx", "archives/bundle.7z"))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$[0].relativePath").value("presentations/deck.pptx"))
+				.andExpect(jsonPath("$[1].relativePath").value("archives/bundle.7z"));
+	}
+
+	@Test
+	void acceptsMissingBrowserMimeOctetStreamUnknownExtensionAndNoExtension() throws Exception {
+		String userToken = accessToken("user@local.dev", "DevUser123!");
+		Long claimId = createClaim(userToken, "Attachments generic content types");
+
+		mockMvc.perform(upload(userToken, claimId,
+				new MockMultipartFile("files", "no-mime.asset", null, new byte[] { 1, 2, 3, 4 }),
+				new MockMultipartFile("files", "octet.payload", "application/octet-stream", new byte[] { 5, 6, 7 }),
+				new MockMultipartFile("files", "README", null, "plain".getBytes(StandardCharsets.UTF_8)))
+				.param("relativePaths", "assets/no-mime.asset", "assets/octet.payload", "README"))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$[0].contentType").value("application/octet-stream"))
+				.andExpect(jsonPath("$[1].contentType").value("application/octet-stream"))
+				.andExpect(jsonPath("$[2].relativePath").value("README"))
+				.andExpect(jsonPath("$[2].contentType").value("application/octet-stream"));
 	}
 
 	@Test
@@ -370,6 +437,20 @@ class AttachmentControllerIntegrationTest {
 
 	private MockMultipartFile textFile(String name, String fileName, String content) {
 		return new MockMultipartFile(name, fileName, "text/plain", content.getBytes(StandardCharsets.UTF_8));
+	}
+
+	private byte[] oleCompoundBytes() {
+		return new byte[] {
+				(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0, (byte) 0xA1, (byte) 0xB1, 0x1A, (byte) 0xE1,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+	}
+
+	private byte[] zipBytes() {
+		return new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00 };
+	}
+
+	private byte[] sevenZipBytes() {
+		return new byte[] { 0x37, 0x7A, (byte) 0xBC, (byte) 0xAF, 0x27, 0x1C, 0x00, 0x04 };
 	}
 
 	private Long createClaim(String token, String title) throws Exception {

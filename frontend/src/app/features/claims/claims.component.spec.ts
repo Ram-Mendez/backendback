@@ -242,6 +242,11 @@ describe('ClaimsComponent', () => {
 
   function flushAttachments(): void {
     httpMock.expectOne('/api/v1/claims/12/attachments').flush([]);
+    httpMock.expectOne('/api/v1/claims/12/attachments/capabilities').flush({
+      maxFileSizeBytes: 1024 * 1024,
+      maxRequestSizeBytes: 4 * 1024 * 1024,
+      maxFilesPerRequest: 20
+    });
   }
 
   function queryElement<T extends Element = Element>(selector: string): T | null {

@@ -10,8 +10,13 @@ export interface AttachmentResponse {
   createdAt: string;
 }
 
+export interface AttachmentCapabilitiesResponse {
+  maxFileSizeBytes: number;
+  maxRequestSizeBytes: number;
+  maxFilesPerRequest: number;
+}
+
 export interface AttachmentUploadItem {
   file: File;
   relativePath: string;
 }
-

@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 
+import com.mendez.ram.attachment.dto.AttachmentCapabilitiesResponse;
 import com.mendez.ram.attachment.dto.AttachmentResponse;
 import com.mendez.ram.attachment.entity.ClaimAttachment;
 import com.mendez.ram.attachment.service.AttachmentDownload;
@@ -50,6 +51,14 @@ public class AttachmentController {
 	public List<AttachmentResponse> findAll(@PathVariable Long claimId,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
 		return attachmentService.findAll(claimId, principal);
+	}
+
+	@GetMapping("/capabilities")
+	@PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
+	@Operation(summary = "Get claim attachment upload capabilities")
+	public AttachmentCapabilitiesResponse capabilities(@PathVariable Long claimId,
+			@AuthenticationPrincipal AuthenticatedUser principal) {
+		return attachmentService.capabilities(claimId, principal);
 	}
 
 	@PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

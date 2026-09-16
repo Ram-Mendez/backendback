@@ -3,7 +3,7 @@ import { inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { API_BASE_URL } from '../../../core/services/api.config';
-import { AttachmentResponse, AttachmentUploadItem } from './attachment.models';
+import { AttachmentCapabilitiesResponse, AttachmentResponse, AttachmentUploadItem } from './attachment.models';
 
 @Injectable({ providedIn: 'root' })
 export class AttachmentService {
@@ -13,6 +13,10 @@ export class AttachmentService {
 
   list(claimId: number): Observable<AttachmentResponse[]> {
     return this.http.get<AttachmentResponse[]>(this.attachmentsUrl(claimId));
+  }
+
+  capabilities(claimId: number): Observable<AttachmentCapabilitiesResponse> {
+    return this.http.get<AttachmentCapabilitiesResponse>(`${this.attachmentsUrl(claimId)}/capabilities`);
   }
 
   upload(claimId: number, items: AttachmentUploadItem[]): Observable<AttachmentResponse[]> {
@@ -39,4 +43,3 @@ export class AttachmentService {
     return `${this.claimsUrl}/${claimId}/attachments`;
   }
 }
-

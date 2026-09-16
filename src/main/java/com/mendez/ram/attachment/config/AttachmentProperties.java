@@ -1,7 +1,6 @@
 package com.mendez.ram.attachment.config;
 
 import java.nio.file.Path;
-import java.util.List;
 
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
@@ -24,22 +23,6 @@ public class AttachmentProperties {
 
 	@Min(1)
 	private int maxFilesPerRequest = 20;
-
-	private List<String> allowedContentTypes = List.of(
-			"application/pdf",
-			"image/png",
-			"image/jpeg",
-			"text/plain",
-			"text/csv",
-			"application/msword",
-			"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-			"application/vnd.ms-excel",
-			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-			"application/zip",
-			"application/octet-stream");
-
-	private List<String> allowedExtensions = List.of(
-			"pdf", "png", "jpg", "jpeg", "txt", "csv", "doc", "docx", "xls", "xlsx", "zip");
 
 	public Path getLocalStorageRoot() {
 		return localStorageRoot;
@@ -71,21 +54,5 @@ public class AttachmentProperties {
 
 	public void setMaxFilesPerRequest(int maxFilesPerRequest) {
 		this.maxFilesPerRequest = maxFilesPerRequest;
-	}
-
-	public List<String> getAllowedContentTypes() {
-		return allowedContentTypes;
-	}
-
-	public void setAllowedContentTypes(List<String> allowedContentTypes) {
-		this.allowedContentTypes = allowedContentTypes;
-	}
-
-	public List<String> getAllowedExtensions() {
-		return allowedExtensions;
-	}
-
-	public void setAllowedExtensions(List<String> allowedExtensions) {
-		this.allowedExtensions = allowedExtensions;
 	}
 }

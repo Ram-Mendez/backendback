@@ -37,6 +37,20 @@ describe('AttachmentService', () => {
     request.flush(response);
   });
 
+  it('reads upload capabilities', () => {
+    service.capabilities(12).subscribe((capabilities) => {
+      expect(capabilities.maxFilesPerRequest).toBe(20);
+    });
+
+    const request = httpMock.expectOne('/api/v1/claims/12/attachments/capabilities');
+    expect(request.request.method).toBe('GET');
+    request.flush({
+      maxFileSizeBytes: 1024,
+      maxRequestSizeBytes: 4096,
+      maxFilesPerRequest: 20
+    });
+  });
+
   it('uploads files using the backend multipart part names', () => {
     const first = new File(['one'], 'one.txt', { type: 'text/plain' });
     const second = new File(['two'], 'two.txt', { type: 'text/plain' });
@@ -91,4 +105,3 @@ describe('AttachmentService', () => {
     };
   }
 });
-

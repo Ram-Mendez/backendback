@@ -23,7 +23,7 @@
       <input #fileInput class="sr-only" type="file" multiple (change)="selectFiles($event)">
       <input #folderInput class="sr-only" type="file" multiple webkitdirectory (change)="selectFolder($event)">
       <div>
-        <strong>Arrastra archivos aqui</strong>
+        <strong>Arrastra archivos o carpetas aqui</strong>
         <span>Tambien puedes seleccionar archivos o una carpeta completa.</span>
       </div>
       <div class="dropzone-actions">
@@ -42,7 +42,16 @@
   @if (queuedFiles().length > 0) {
     <section class="queue" aria-labelledby="attachment-queue-title">
       <div class="queue-header">
-        <h4 id="attachment-queue-title">Pendientes de envio</h4>
+        <div>
+          <h4 id="attachment-queue-title">Pendientes de envio</h4>
+          <p>{{ queueSummary() }}</p>
+          @if (batchProgress()) {
+            <p>{{ batchProgress() }}</p>
+          }
+          @if (queueLimitMessage(); as limitMessage) {
+            <p class="queue-limit" role="alert">{{ limitMessage }}</p>
+          }
+        </div>
         <button class="primary-button compact" type="button" (click)="uploadQueuedFiles()" [disabled]="!canStartUpload()">
           {{ uploading() ? 'Subiendo...' : 'Subir adjuntos' }}
         </button>
@@ -101,4 +110,3 @@
     }
   </section>
 </section>
-

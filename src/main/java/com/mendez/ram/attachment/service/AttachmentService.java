@@ -2,6 +2,7 @@ package com.mendez.ram.attachment.service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -13,6 +14,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import com.mendez.ram.attachment.config.AttachmentProperties;
+import com.mendez.ram.attachment.dto.AttachmentCapabilitiesResponse;
 import com.mendez.ram.attachment.dto.AttachmentResponse;
 import com.mendez.ram.attachment.entity.ClaimAttachment;
 import com.mendez.ram.attachment.mapper.AttachmentMapper;
@@ -32,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -75,6 +78,15 @@ public class AttachmentService {
 				.stream()
 				.map(attachmentMapper::toResponse)
 				.toList();
+	}
+
+	@Transactional(readOnly = true)
+	public AttachmentCapabilitiesResponse capabilities(Long claimId, AuthenticatedUser principal) {
+		claimService.requireViewableClaim(claimId, principal);
+		return new AttachmentCapabilitiesResponse(
+				properties.getMaxFileSize().toBytes(),
+				properties.getMaxRequestSize().toBytes(),
+				properties.getMaxFilesPerRequest());
 	}
 
 	@Transactional
@@ -131,8 +143,7 @@ public class AttachmentService {
 		SanitizedAttachmentPath sanitizedPath = pathSanitizer.sanitize(submittedPath, file.getOriginalFilename());
 		String relativePath = uniqueRelativePath(sanitizedPath.relativePath(), usedRelativePaths);
 		String fileName = fileNameOf(relativePath);
-		String contentType = normalizeContentType(file.getContentType());
-		validateType(file, fileName, contentType);
+		String contentType = resolveContentType(file, fileName);
 
 		UUID attachmentId = UUID.randomUUID();
 		String storageKey = "claims/" + claim.getId() + "/" + attachmentId + "/" + fileName;
@@ -215,29 +226,19 @@ public class AttachmentService {
 		}
 	}
 
-	private void validateType(MultipartFile file, String fileName, String contentType) {
-		String extension = extensionOf(fileName);
-		Set<String> allowedExtensions = properties.getAllowedExtensions().stream()
-				.map(value -> value.toLowerCase(Locale.ROOT))
-				.collect(Collectors.toUnmodifiableSet());
-		if (extension.isBlank() || !allowedExtensions.contains(extension)) {
-			throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "ATTACHMENT_TYPE_NOT_ALLOWED",
-					"La extension del adjunto no esta permitida.");
-		}
+	private String resolveContentType(MultipartFile file, String fileName) {
+		byte[] signature = readSignature(file);
+		validateKnownContentSignature(fileName, signature);
+		return normalizeContentType(file.getContentType());
+	}
 
-		String normalizedContentType = contentType.toLowerCase(Locale.ROOT);
-		boolean allowedContentType = properties.getAllowedContentTypes().stream()
-				.map(value -> value.toLowerCase(Locale.ROOT))
-				.anyMatch(allowed -> matchesContentType(allowed, normalizedContentType));
-		if (!allowedContentType) {
-			throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "ATTACHMENT_TYPE_NOT_ALLOWED",
-					"El tipo MIME del adjunto no esta permitido.");
+	private void validateKnownContentSignature(String fileName, byte[] signature) {
+		String extension = extensionOf(fileName);
+		if (!requiresKnownSignature(extension)) {
+			return;
 		}
-		if (!contentTypeCompatibleWithExtension(extension, normalizedContentType)) {
-			throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "ATTACHMENT_TYPE_NOT_ALLOWED",
-					"El tipo MIME del adjunto no corresponde a la extension indicada.");
-		}
-		if (!contentMatchesExtension(extension, readSignature(file))) {
+		ContentSignature contentSignature = detectSignature(signature);
+		if (!signatureMatchesExtension(extension, contentSignature)) {
 			throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "ATTACHMENT_TYPE_NOT_ALLOWED",
 					"El contenido del adjunto no corresponde a la extension indicada.");
 		}
@@ -254,71 +255,29 @@ public class AttachmentService {
 		}
 	}
 
-	private static boolean contentTypeCompatibleWithExtension(String extension, String contentType) {
-		if (DEFAULT_CONTENT_TYPE.equals(contentType)) {
-			return true;
-		}
+	private static boolean requiresKnownSignature(String extension) {
 		return switch (extension) {
-			case "pdf" -> contentType.equals("application/pdf");
-			case "png" -> contentType.equals("image/png");
-			case "jpg", "jpeg" -> contentType.equals("image/jpeg");
-			case "txt" -> contentType.equals("text/plain");
-			case "csv" -> contentType.equals("text/csv") || contentType.equals("text/plain");
-			case "doc" -> contentType.equals("application/msword");
-			case "docx" -> contentType.equals("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-			case "xls" -> contentType.equals("application/vnd.ms-excel");
-			case "xlsx" -> contentType.equals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-			case "zip" -> contentType.equals("application/zip");
+			case "pdf", "png", "jpg", "jpeg", "gif", "webp", "zip", "doc", "xls", "ppt", "docx", "xlsx",
+					"pptx", "rar", "7z", "gz", "gzip", "tgz", "tar" -> true;
 			default -> false;
 		};
 	}
 
-	private static boolean contentMatchesExtension(String extension, byte[] signature) {
+	private static boolean signatureMatchesExtension(String extension, ContentSignature signature) {
 		return switch (extension) {
-			case "pdf" -> startsWith(signature, "%PDF-".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
-			case "png" -> startsWith(signature, new byte[] {
-					(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
-			case "jpg", "jpeg" -> signature.length >= 3
-					&& (signature[0] & 0xFF) == 0xFF
-					&& (signature[1] & 0xFF) == 0xD8
-					&& (signature[2] & 0xFF) == 0xFF;
-			case "txt", "csv" -> looksLikeText(signature);
-			case "doc", "xls" -> startsWith(signature, new byte[] {
-					(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0, (byte) 0xA1, (byte) 0xB1, 0x1A, (byte) 0xE1 });
-			case "docx", "xlsx", "zip" -> isZip(signature);
-			default -> false;
+			case "pdf" -> signature == ContentSignature.PDF;
+			case "png" -> signature == ContentSignature.PNG;
+			case "jpg", "jpeg" -> signature == ContentSignature.JPEG;
+			case "gif" -> signature == ContentSignature.GIF;
+			case "webp" -> signature == ContentSignature.WEBP;
+			case "zip", "docx", "xlsx", "pptx" -> signature == ContentSignature.ZIP;
+			case "doc", "xls", "ppt" -> signature == ContentSignature.OLE_COMPOUND;
+			case "rar" -> signature == ContentSignature.RAR;
+			case "7z" -> signature == ContentSignature.SEVEN_Z;
+			case "gz", "gzip", "tgz" -> signature == ContentSignature.GZIP;
+			case "tar" -> signature == ContentSignature.TAR;
+			default -> true;
 		};
-	}
-
-	private static boolean startsWith(byte[] value, byte[] prefix) {
-		if (value.length < prefix.length) {
-			return false;
-		}
-		for (int index = 0; index < prefix.length; index++) {
-			if (value[index] != prefix[index]) {
-				return false;
-			}
-		}
-		return true;
-	}
-
-	private static boolean isZip(byte[] signature) {
-		return startsWith(signature, new byte[] { 0x50, 0x4B, 0x03, 0x04 })
-				|| startsWith(signature, new byte[] { 0x50, 0x4B, 0x05, 0x06 })
-				|| startsWith(signature, new byte[] { 0x50, 0x4B, 0x07, 0x08 });
-	}
-
-	private static boolean looksLikeText(byte[] signature) {
-		for (byte current : signature) {
-			int value = current & 0xFF;
-			if (value == 0) {
-				return false;
-			}
-			if (value < 0x20 && value != '\t' && value != '\n' && value != '\r') {
-				return false;
-			}
-		}
-		return true;
 	}
 
 	private void registerUploadRollbackCleanup(Long claimId, List<String> storedStorageKeys) {
@@ -407,16 +366,77 @@ public class AttachmentService {
 		return candidate;
 	}
 
-	private static boolean matchesContentType(String allowed, String actual) {
-		if (allowed.equals("*/*") || allowed.equals(actual)) {
-			return true;
+	private static ContentSignature detectSignature(byte[] signature) {
+		if (startsWith(signature, "%PDF-".getBytes(StandardCharsets.US_ASCII))) {
+			return ContentSignature.PDF;
 		}
-		if (!allowed.endsWith("/*")) {
+		if (startsWith(signature, new byte[] {
+				(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A })) {
+			return ContentSignature.PNG;
+		}
+		if (signature.length >= 3
+				&& (signature[0] & 0xFF) == 0xFF
+				&& (signature[1] & 0xFF) == 0xD8
+				&& (signature[2] & 0xFF) == 0xFF) {
+			return ContentSignature.JPEG;
+		}
+		if (startsWith(signature, "GIF87a".getBytes(StandardCharsets.US_ASCII))
+				|| startsWith(signature, "GIF89a".getBytes(StandardCharsets.US_ASCII))) {
+			return ContentSignature.GIF;
+		}
+		if (startsWith(signature, "RIFF".getBytes(StandardCharsets.US_ASCII))
+				&& signature.length >= 12
+				&& signature[8] == 'W'
+				&& signature[9] == 'E'
+				&& signature[10] == 'B'
+				&& signature[11] == 'P') {
+			return ContentSignature.WEBP;
+		}
+		if (isZip(signature)) {
+			return ContentSignature.ZIP;
+		}
+		if (startsWith(signature, new byte[] {
+				(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0, (byte) 0xA1, (byte) 0xB1, 0x1A,
+				(byte) 0xE1 })) {
+			return ContentSignature.OLE_COMPOUND;
+		}
+		if (startsWith(signature, new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00 })
+				|| startsWith(signature, new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00 })) {
+			return ContentSignature.RAR;
+		}
+		if (startsWith(signature, new byte[] { 0x37, 0x7A, (byte) 0xBC, (byte) 0xAF, 0x27, 0x1C })) {
+			return ContentSignature.SEVEN_Z;
+		}
+		if (startsWith(signature, new byte[] { 0x1F, (byte) 0x8B })) {
+			return ContentSignature.GZIP;
+		}
+		if (signature.length >= 263
+				&& signature[257] == 'u'
+				&& signature[258] == 's'
+				&& signature[259] == 't'
+				&& signature[260] == 'a'
+				&& signature[261] == 'r') {
+			return ContentSignature.TAR;
+		}
+		return ContentSignature.UNKNOWN;
+	}
+
+	private static boolean startsWith(byte[] value, byte[] prefix) {
+		if (value.length < prefix.length) {
 			return false;
 		}
-		String allowedPrefix = allowed.substring(0, allowed.indexOf('/'));
-		int slashIndex = actual.indexOf('/');
-		return slashIndex > 0 && allowedPrefix.equals(actual.substring(0, slashIndex));
+		for (int index = 0; index < prefix.length; index++) {
+			if (value[index] != prefix[index]) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static boolean isZip(byte[] signature) {
+		return startsWith(signature, new byte[] { 0x50, 0x4B, 0x03, 0x04 })
+				|| startsWith(signature, new byte[] { 0x50, 0x4B, 0x05, 0x06 })
+				|| startsWith(signature, new byte[] { 0x50, 0x4B, 0x07, 0x08 });
 	}
 
 	private static String normalizeContentType(String contentType) {
@@ -426,7 +446,16 @@ public class AttachmentService {
 		int separatorIndex = contentType.indexOf(';');
 		String normalized = separatorIndex >= 0 ? contentType.substring(0, separatorIndex) : contentType;
 		normalized = normalized.trim().toLowerCase(Locale.ROOT);
-		return normalized.isBlank() ? DEFAULT_CONTENT_TYPE : normalized;
+		if (normalized.isBlank() || normalized.length() > 255) {
+			return DEFAULT_CONTENT_TYPE;
+		}
+		try {
+			MediaType.parseMediaType(normalized);
+			return normalized;
+		}
+		catch (RuntimeException exception) {
+			return DEFAULT_CONTENT_TYPE;
+		}
 	}
 
 	private static String fileNameOf(String relativePath) {
@@ -440,5 +469,20 @@ public class AttachmentService {
 			return "";
 		}
 		return fileName.substring(dotIndex + 1).toLowerCase(Locale.ROOT);
+	}
+
+	private enum ContentSignature {
+		PDF,
+		PNG,
+		JPEG,
+		GIF,
+		WEBP,
+		ZIP,
+		OLE_COMPOUND,
+		RAR,
+		SEVEN_Z,
+		GZIP,
+		TAR,
+		UNKNOWN
 	}
 }
