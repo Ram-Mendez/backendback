@@ -3,53 +3,53 @@
   display: grid;
   place-items: center;
   padding: var(--space-6);
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 72%), rgb(255 255 255 / 0) 42%),
-    var(--bg);
+  background: var(--bg);
 }
 
 .login-panel {
   width: min(100%, 420px);
   padding: var(--space-8);
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-sm);
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  color: var(--muted-strong);
-  font-weight: 700;
   margin-bottom: var(--space-8);
+  color: var(--muted-strong);
+  font-weight: 660;
 }
 
 .brand-mark {
   display: inline-grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
-  background: var(--primary);
-  color: white;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius);
-  font-size: 0.78rem;
+  background: var(--primary);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 760;
   letter-spacing: 0;
-  box-shadow: 0 8px 18px rgb(15 118 110 / 20%);
+  box-shadow: 0 8px 18px rgb(15 118 110 / 14%);
 }
 
 h1 {
   margin: 0;
   color: var(--text-strong);
-  font-size: 1.9rem;
-  line-height: 1.2;
+  font-size: 2rem;
+  font-weight: 740;
+  line-height: 1.12;
 }
 
 .login-copy {
   margin: var(--space-2) 0 var(--space-6);
   color: var(--muted);
-  font-size: 0.95rem;
+  font-size: 0.94rem;
 }
 
 form {
@@ -59,24 +59,25 @@ form {
 
 .field {
   display: grid;
-  gap: var(--space-2);
+  gap: 6px;
 }
 
 label {
-  color: var(--muted);
-  font-size: 0.9rem;
-  font-weight: 600;
+  color: var(--muted-strong);
+  font-size: 0.78rem;
+  font-weight: 660;
 }
 
 input {
   width: 100%;
-  min-height: 44px;
+  min-height: 40px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 8px 10px;
   color: var(--text);
-  background: white;
-  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+  background: var(--surface);
+  box-shadow: 0 1px 0 rgb(15 23 32 / 2%);
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
 }
 
 input:hover {
@@ -102,8 +103,8 @@ input.invalid {
 .field-error {
   margin: 0;
   color: var(--danger);
-  font-size: 0.84rem;
-  font-weight: 650;
+  font-size: 0.8rem;
+  font-weight: 620;
 }
 
 .login-error {
@@ -111,46 +112,28 @@ input.invalid {
   display: grid;
   gap: var(--space-1);
   padding: 11px 12px;
-  border: 1px solid rgb(180 35 24 / 22%);
+  border: 1px solid rgb(180 35 24 / 18%);
   border-radius: var(--radius);
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 0.9rem;
+  font-size: 0.88rem;
 }
 
 .login-error strong {
-  color: #7a271a;
-  font-size: 0.84rem;
+  color: var(--danger-strong);
+  font-size: 0.82rem;
 }
 
 .primary-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  min-height: 44px;
-  border: 0;
-  border-radius: var(--radius);
-  color: white;
-  background: var(--primary);
-  font-weight: 700;
-  transition: background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
-}
-
-.primary-button:hover:not(:disabled) {
-  background: var(--primary-strong);
-  box-shadow: 0 8px 18px rgb(15 118 110 / 18%);
-}
-
-.primary-button:active:not(:disabled) {
-  transform: translateY(1px);
+  min-height: 42px;
+  width: 100%;
 }
 
 .spinner {
   width: 16px;
   height: 16px;
   border: 2px solid rgb(255 255 255 / 46%);
-  border-top-color: white;
+  border-top-color: #ffffff;
   border-radius: 50%;
   animation: spin 700ms linear infinite;
 }

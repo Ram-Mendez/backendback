@@ -1,20 +1,23 @@
 :root {
   color-scheme: light;
-  --bg: #f4f6f9;
+  --bg: #f6f7f8;
   --surface: #ffffff;
-  --surface-muted: #f7f9fc;
-  --surface-subtle: #eef3f7;
+  --surface-muted: #f8fafb;
+  --surface-subtle: #f1f4f5;
   --surface-raised: #ffffff;
-  --text: #182230;
-  --text-strong: #101828;
-  --muted: #667085;
-  --muted-strong: #475467;
-  --line: #d9e2ec;
-  --line-strong: #b8c4d2;
+  --text: #1d2430;
+  --text-strong: #0f1720;
+  --muted: #6b7280;
+  --muted-strong: #4b5563;
+  --line: #e2e6ea;
+  --line-soft: #edf0f2;
+  --line-strong: #c9d0d8;
   --primary: #0f766e;
-  --primary-strong: #0b5f59;
-  --primary-soft: #e6f4f1;
+  --primary-strong: #0a5e58;
+  --primary-soft: #e8f6f4;
+  --primary-faint: #f3fbfa;
   --danger: #b42318;
+  --danger-strong: #7a271a;
   --danger-soft: #fff1f0;
   --warning: #a15c07;
   --warning-soft: #fff7e8;
@@ -22,18 +25,21 @@
   --info-soft: #eef4ff;
   --success: #0f766e;
   --success-soft: #ecfdf3;
-  --radius-sm: 4px;
-  --radius: 6px;
-  --radius-lg: 8px;
-  --shadow-sm: 0 1px 2px rgb(16 24 40 / 6%);
-  --shadow: 0 14px 36px rgb(16 24 40 / 10%);
-  --focus-ring: 0 0 0 3px rgb(15 118 110 / 18%);
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --shadow-xs: 0 1px 1px rgb(15 23 32 / 4%);
+  --shadow-sm: 0 1px 2px rgb(15 23 32 / 6%), 0 8px 24px rgb(15 23 32 / 4%);
+  --shadow: 0 22px 70px rgb(15 23 32 / 12%);
+  --focus-ring: 0 0 0 3px rgb(15 118 110 / 16%);
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
+  --space-7: 28px;
   --space-8: 32px;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
@@ -52,7 +58,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-size: 15px;
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -70,11 +76,15 @@ button {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.62;
+  opacity: 0.58;
 }
 
 a {
   color: inherit;
+}
+
+::selection {
+  background: rgb(15 118 110 / 16%);
 }
 
 :focus-visible {
@@ -82,8 +92,99 @@ a {
   box-shadow: var(--focus-ring);
 }
 
-::selection {
-  background: rgb(15 118 110 / 18%);
+.primary-button,
+.secondary-button,
+.ghost-button,
+.link-button,
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border-radius: var(--radius);
+  font-weight: 680;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button {
+  min-height: 40px;
+  padding: 0 14px;
+}
+
+.primary-button {
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.primary-button:hover:not(:disabled) {
+  border-color: var(--primary-strong);
+  background: var(--primary-strong);
+  box-shadow: 0 8px 20px rgb(15 118 110 / 14%);
+}
+
+.secondary-button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text-strong);
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+}
+
+.ghost-button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-strong);
+}
+
+.ghost-button:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--text-strong);
+}
+
+.link-button,
+.icon-button {
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.link-button {
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--primary);
+  font-size: 0.82rem;
+}
+
+.link-button:hover:not(:disabled) {
+  border-color: rgb(15 118 110 / 14%);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.primary-button:active:not(:disabled),
+.secondary-button:active:not(:disabled),
+.ghost-button:active:not(:disabled),
+.link-button:active:not(:disabled),
+.icon-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.compact {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 0.84rem;
 }
 
 .sr-only {
