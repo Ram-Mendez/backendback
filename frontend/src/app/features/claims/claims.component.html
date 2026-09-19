@@ -58,6 +58,9 @@
           Creado por
           <input id="filter-created-by" type="search" formControlName="createdBy" placeholder="Usuario">
         </label>
+        <label class="field">Responsable<input type="search" formControlName="assignedTo" placeholder="Usuario"></label>
+        <label class="field">Prioridad<select formControlName="priority"><option value="">Todas</option>@for (priority of priorities; track priority) { <option [value]="priority">{{ priority }}</option> }</select></label>
+        <label class="field"><input type="checkbox" formControlName="overdue"> Solo vencidas</label>
 
         <label class="field" for="filter-status">
           Estado
@@ -115,6 +118,7 @@
                 <th>Referencia</th>
                 <th>Título</th>
                 <th>Estado</th>
+                <th>Prioridad</th><th>Responsable</th>
                 <th>Creado por</th>
                 <th>Fecha creación</th>
                 <th>Última actualización</th>
@@ -172,6 +176,7 @@
                 <th scope="col">Referencia</th>
                 <th scope="col">Título</th>
                 <th scope="col">Estado</th>
+                <th scope="col">Prioridad</th><th scope="col">Responsable</th>
                 <th scope="col">Creado por</th>
                 <th scope="col">Fecha creación</th>
                 <th scope="col">Última actualización</th>
@@ -191,6 +196,7 @@
                   <td>
                     <strong class="claim-reference">{{ claim.reference }}</strong>
                   </td>
+                  <td>{{ claim.priority ?? 'NORMAL' }}</td><td>{{ claim.assignedToUsername ?? 'Sin asignar' }}</td>
                   <td>
                     <strong class="claim-title">{{ claim.title }}</strong>
                   </td>
@@ -330,6 +336,9 @@
             </section>
 
             <dl class="detail-list">
+              <div><dt>Prioridad</dt><dd>{{ detail.priority ?? 'NORMAL' }}</dd></div>
+              <div><dt>Responsable</dt><dd>{{ detail.assignedToUsername ?? 'Sin asignar' }}</dd></div>
+              <div><dt>Fecha límite</dt><dd>{{ detail.dueAt ? (detail.dueAt | date:'dd/MM/yyyy HH:mm') : 'Sin fecha límite' }}</dd></div>
               <div>
                 <dt>Creado por</dt>
                 <dd>{{ detail.createdByUsername }} · ID {{ detail.createdById }}</dd>
@@ -351,6 +360,12 @@
                 <dd>{{ detail.version }}</dd>
               </div>
             </dl>
+
+            @if (canReviewClaims()) {
+              <section class="detail-section"><h3>Asignación</h3><select [formControl]="assigneeControl"><option [ngValue]="null">Selecciona responsable</option>@for (reviewer of reviewers(); track reviewer.id) { <option [ngValue]="reviewer.id">{{ reviewer.username }}</option> }</select><button type="button" class="secondary-button compact" (click)="assignSelected()">Asignar</button></section>
+            }
+            <section class="detail-section"><h3>Comentarios internos</h3>@for (comment of comments(); track comment.id) { <p><strong>{{ comment.authorUsername }}</strong> · {{ comment.createdAt | date:'dd/MM/yyyy HH:mm' }}<br>{{ comment.body }}</p> }<textarea [formControl]="commentControl" rows="2" placeholder="Añadir comentario interno"></textarea><button type="button" class="secondary-button compact" (click)="addComment()">Comentar</button></section>
+            <section class="detail-section"><h3>Historial</h3>@for (event of history(); track event.id) { <p><strong>{{ event.eventType }}</strong> · {{ event.actorUsername }} · {{ event.occurredAt | date:'dd/MM/yyyy HH:mm' }}<br>{{ event.eventData }}</p> }</section>
 
             <app-claim-attachments [claimId]="detail.id" [editable]="canEditClaim(detail)"></app-claim-attachments>
 
@@ -409,6 +424,8 @@
               }
             </div>
           </div>
+          <div class="field"><label for="priority">Prioridad</label><select id="priority" formControlName="priority">@for (priority of priorities; track priority) { <option [value]="priority">{{ priority }}</option> }</select></div>
+          <div class="field"><label for="due-at">Fecha límite</label><input id="due-at" type="datetime-local" formControlName="dueAt"></div>
 
           <div class="field">
             <label for="description">Descripción</label>

@@ -12,6 +12,7 @@ import {
   PageResponse,
   UpdateClaimRequest
 } from './claims.models';
+import { ClaimComment, ClaimHistory, Reviewer } from './claims.models';
 
 @Injectable({ providedIn: 'root' })
 export class ClaimsService {
@@ -40,6 +41,12 @@ export class ClaimsService {
     return this.http.patch<ClaimDetail>(`${this.claimUrl(id)}/status`, { status, version });
   }
 
+  comments(id: number): Observable<ClaimComment[]> { return this.http.get<ClaimComment[]>(`${this.claimUrl(id)}/comments`); }
+  addComment(id: number, body: string): Observable<ClaimComment> { return this.http.post<ClaimComment>(`${this.claimUrl(id)}/comments`, { body }); }
+  history(id: number): Observable<ClaimHistory[]> { return this.http.get<ClaimHistory[]>(`${this.claimUrl(id)}/history`); }
+  reviewers(): Observable<Reviewer[]> { return this.http.get<Reviewer[]>(`${this.claimsUrl}/reviewers`); }
+  assign(id: number, assignedToId: number, version: number): Observable<ClaimDetail> { return this.http.patch<ClaimDetail>(`${this.claimUrl(id)}/assignment`, { assignedToId, version }); }
+
   private claimUrl(id: number): string {
     return `${this.claimsUrl}/${id}`;
   }
@@ -53,6 +60,9 @@ export class ClaimsService {
     params = this.appendIfPresent(params, 'search', filters.search);
     params = this.appendIfPresent(params, 'reference', filters.reference);
     params = this.appendIfPresent(params, 'createdBy', filters.createdBy);
+    params = this.appendIfPresent(params, 'assignedTo', filters.assignedTo);
+    params = this.appendIfPresent(params, 'priority', filters.priority);
+    if (filters.overdue !== null && filters.overdue !== undefined) params = params.set('overdue', filters.overdue);
     params = this.appendIfPresent(params, 'status', filters.status);
     params = this.appendIfPresent(params, 'createdFrom', filters.createdFrom);
     params = this.appendIfPresent(params, 'createdTo', filters.createdTo);

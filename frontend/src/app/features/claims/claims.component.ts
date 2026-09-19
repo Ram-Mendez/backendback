@@ -14,6 +14,7 @@ import {
   CreateClaimRequest,
   UpdateClaimRequest
 } from './claims.models';
+import { ClaimPriority, ClaimComment, ClaimHistory, Reviewer } from './claims.models';
 import { ClaimsService } from './claims.service';
 import { ClaimAttachmentsComponent } from './attachments/claim-attachments.component';
 
@@ -25,6 +26,9 @@ interface ClaimFiltersFormValue {
   search: string;
   reference: string;
   createdBy: string;
+  assignedTo: string;
+  priority: ClaimPriority | '';
+  overdue: boolean;
   status: ClaimStatus | '';
   createdFrom: string;
   createdTo: string;
@@ -52,6 +56,9 @@ const EMPTY_FILTERS: ClaimFiltersFormValue = {
   search: '',
   reference: '',
   createdBy: '',
+  assignedTo: '',
+  priority: '',
+  overdue: false,
   status: '',
   createdFrom: '',
   createdTo: ''
@@ -94,12 +101,16 @@ export class ClaimsComponent implements OnInit {
     INADMISSIBLE: 'Inadmitida'
   };
   readonly pageSizeOptions: PageSize[] = [10, 20, 50];
+  readonly priorities: ClaimPriority[] = ['LOW', 'NORMAL', 'HIGH', 'CRITICAL'];
   readonly skeletonRows = Array.from({ length: 10 }, (_value, index) => index);
 
   readonly filtersForm = new FormGroup({
     search: new FormControl('', { nonNullable: true }),
     reference: new FormControl('', { nonNullable: true }),
     createdBy: new FormControl('', { nonNullable: true }),
+    assignedTo: new FormControl('', { nonNullable: true }),
+    priority: new FormControl<ClaimPriority | ''>('', { nonNullable: true }),
+    overdue: new FormControl(false, { nonNullable: true }),
     status: new FormControl<ClaimStatus | ''>('', { nonNullable: true }),
     createdFrom: new FormControl('', { nonNullable: true }),
     createdTo: new FormControl('', { nonNullable: true })
@@ -108,7 +119,9 @@ export class ClaimsComponent implements OnInit {
   readonly claimForm = new FormGroup({
     title: new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.maxLength(200)] }),
     claimantName: new FormControl('', { nonNullable: true, validators: [Validators.maxLength(160)] }),
-    description: new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.maxLength(4000)] })
+    description: new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.maxLength(4000)] }),
+    priority: new FormControl<ClaimPriority>('NORMAL', { nonNullable: true }),
+    dueAt: new FormControl('', { nonNullable: true })
   });
 
   readonly statusControl = new FormControl<ClaimStatus>('DRAFT', {
@@ -136,6 +149,11 @@ export class ClaimsComponent implements OnInit {
   readonly totalPages = signal(0);
   readonly appliedFilters = signal<ClaimFiltersFormValue>(this.emptyFilters());
   readonly selectedStatus = signal<ClaimStatus>('DRAFT');
+  readonly comments = signal<ClaimComment[]>([]);
+  readonly history = signal<ClaimHistory[]>([]);
+  readonly reviewers = signal<Reviewer[]>([]);
+  readonly commentControl = new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.maxLength(2000)] });
+  readonly assigneeControl = new FormControl<number | null>(null);
   readonly currentUser = this.authService.user;
   readonly canCreate = computed(() => this.authService.hasAnyRole(['ROLE_USER', 'ROLE_MANAGER', 'ROLE_ADMIN']));
   readonly canReviewClaims = computed(() => this.authService.hasAnyRole(['ROLE_MANAGER', 'ROLE_ADMIN']));
@@ -299,6 +317,16 @@ export class ClaimsComponent implements OnInit {
       });
   }
 
+  addComment(): void {
+    const detail=this.selectedClaimDetail(); if (!detail || this.commentControl.invalid) return;
+    this.claimsService.addComment(detail.id, this.commentControl.value.trim()).subscribe({ next: comment => { this.comments.update(items => [...items, comment]); this.commentControl.reset(''); }, error: error => this.formErrorMessage.set(this.apiErrorMessage(error, 'No se ha podido guardar el comentario.')) });
+  }
+
+  assignSelected(): void {
+    const detail=this.selectedClaimDetail(); const assignee=this.assigneeControl.value; if (!detail || assignee === null) return;
+    this.claimsService.assign(detail.id, assignee, detail.version).subscribe({ next: updated => { this.selectedClaimDetail.set(updated); this.loadClaims(); }, error: error => this.formErrorMessage.set(this.apiErrorMessage(error, 'No se ha podido asignar la reclamación.')) });
+  }
+
   retryDrawerLoad(): void {
     const claim = this.selectedClaimSummary();
     const mode = this.drawerMode();
@@ -408,6 +436,9 @@ export class ClaimsComponent implements OnInit {
             search: query.filters.search,
             reference: query.filters.reference,
             createdBy: query.filters.createdBy,
+            assignedTo: query.filters.assignedTo,
+            priority: query.filters.priority,
+            overdue: query.filters.overdue || null,
             status: query.filters.status,
             createdFrom: query.filters.createdFrom,
             createdTo: query.filters.createdTo,
@@ -443,6 +474,12 @@ export class ClaimsComponent implements OnInit {
         this.pageSize.set(this.asPageSize(page.size));
         this.keepSelectionInPage(page.content);
       });
+  }
+
+  private loadCollaboration(id: number): void {
+    this.claimsService.comments(id).subscribe(items => this.comments.set(items));
+    this.claimsService.history(id).subscribe(items => this.history.set(items));
+    if (this.canReviewClaims()) this.claimsService.reviewers().subscribe(items => this.reviewers.set(items));
   }
 
   private bindDetailRequests(): void {
@@ -484,11 +521,15 @@ export class ClaimsComponent implements OnInit {
         }
 
         this.selectedClaimDetail.set(detail);
+        this.loadCollaboration(detail.id);
+        this.assigneeControl.setValue(detail.assignedToId ?? null);
         if (request.mode === 'edit') {
           this.resetClaimForm({
             title: detail.title,
             claimantName: detail.claimantName ?? '',
-            description: detail.description
+            description: detail.description,
+            priority: detail.priority ?? 'NORMAL',
+            dueAt: detail.dueAt ? detail.dueAt.slice(0, 16) : ''
           });
           this.setStatusControl(detail.status);
         }
@@ -499,11 +540,14 @@ export class ClaimsComponent implements OnInit {
     const textFilterChanges = merge(
       this.filtersForm.controls.search.valueChanges,
       this.filtersForm.controls.reference.valueChanges,
-      this.filtersForm.controls.createdBy.valueChanges
+      this.filtersForm.controls.createdBy.valueChanges,
+      this.filtersForm.controls.assignedTo.valueChanges
     ).pipe(debounceTime(FILTER_DEBOUNCE_MS));
 
     const immediateFilterChanges = merge(
       this.filtersForm.controls.status.valueChanges,
+      this.filtersForm.controls.priority.valueChanges,
+      this.filtersForm.controls.overdue.valueChanges,
       this.filtersForm.controls.createdFrom.valueChanges,
       this.filtersForm.controls.createdTo.valueChanges
     );
@@ -534,7 +578,7 @@ export class ClaimsComponent implements OnInit {
     this.formErrorMessage.set(null);
 
     if (request.mode === 'edit') {
-      this.resetClaimForm({ title: request.claim.title, claimantName: '', description: '' });
+      this.resetClaimForm({ title: request.claim.title, claimantName: '', description: '', priority: request.claim.priority });
       this.setStatusControl(request.claim.status);
     }
   }
@@ -571,7 +615,9 @@ export class ClaimsComponent implements OnInit {
     return {
       title: value.title.trim(),
       description: value.description.trim(),
-      claimantName: this.trimToNull(value.claimantName)
+      claimantName: this.trimToNull(value.claimantName),
+      priority: value.priority === 'CRITICAL' ? 'HIGH' : value.priority,
+      dueAt: value.dueAt ? new Date(value.dueAt).toISOString() : null
     };
   }
 
@@ -582,13 +628,13 @@ export class ClaimsComponent implements OnInit {
     };
   }
 
-  private resetClaimForm(value?: { title: string; claimantName: string | null; description: string }): void {
+  private resetClaimForm(value?: { title: string; claimantName: string | null; description: string; priority?: ClaimPriority; dueAt?: string }): void {
     this.claimForm.reset(value === undefined
-      ? { title: '', claimantName: '', description: '' }
+      ? { title: '', claimantName: '', description: '', priority: 'NORMAL' as ClaimPriority, dueAt: '' }
       : {
         title: value.title,
         claimantName: value.claimantName ?? '',
-        description: value.description
+        description: value.description, priority: value.priority ?? 'NORMAL', dueAt: value.dueAt ?? ''
       });
   }
 
@@ -606,6 +652,7 @@ export class ClaimsComponent implements OnInit {
       search: filters.search.trim(),
       reference: filters.reference.trim(),
       createdBy: filters.createdBy.trim(),
+      assignedTo: filters.assignedTo.trim(), priority: filters.priority, overdue: filters.overdue,
       status: filters.status,
       createdFrom: filters.createdFrom,
       createdTo: filters.createdTo
@@ -625,6 +672,7 @@ export class ClaimsComponent implements OnInit {
       filters.search,
       filters.reference,
       filters.createdBy,
+      filters.assignedTo, filters.priority, filters.overdue ? 'overdue' : '',
       filters.status,
       filters.createdFrom,
       filters.createdTo
@@ -643,6 +691,7 @@ export class ClaimsComponent implements OnInit {
     return first.search === second.search
       && first.reference === second.reference
       && first.createdBy === second.createdBy
+      && first.assignedTo === second.assignedTo && first.priority === second.priority && first.overdue === second.overdue
       && first.status === second.status
       && first.createdFrom === second.createdFrom
       && first.createdTo === second.createdTo;

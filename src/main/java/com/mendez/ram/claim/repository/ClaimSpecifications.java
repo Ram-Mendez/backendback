@@ -24,12 +24,26 @@ public final class ClaimSpecifications {
 						: builder.equal(root.get("status"), criteria.status()))
 				.and(containsIgnoreCase("reference", criteria.reference()))
 				.and(createdBy(criteria.createdBy()))
+				.and(userMatches("createdBy", criteria.assignedTo()))
+				.and((root, query, builder) -> criteria.priority() == null ? builder.conjunction() : builder.equal(root.get("priority"), criteria.priority()))
+				.and((root, query, builder) -> criteria.overdue() == null ? builder.conjunction() : criteria.overdue()
+						? builder.and(builder.isNotNull(root.get("dueAt")), builder.lessThan(root.get("dueAt"), Instant.now()))
+						: builder.or(builder.isNull(root.get("dueAt")), builder.greaterThanOrEqualTo(root.get("dueAt"), Instant.now())))
 				.and((root, query, builder) -> criteria.createdFrom() == null
 						? builder.conjunction()
 						: builder.greaterThanOrEqualTo(root.get("createdAt"), startOfDay(criteria.createdFrom())))
 				.and((root, query, builder) -> criteria.createdTo() == null
 						? builder.conjunction()
 						: builder.lessThan(root.get("createdAt"), startOfDay(criteria.createdTo().plusDays(1))));
+	}
+
+	private static Specification<Claim> userMatches(String field, String value) {
+		return (root, query, builder) -> {
+			if (!StringUtils.hasText(value)) return builder.conjunction();
+			String trimmed=value.trim(); var user=root.join(field, JoinType.LEFT); String pattern=contains(trimmed);
+			var text=builder.or(builder.like(builder.lower(user.get("username")), pattern), builder.like(builder.lower(user.get("email")), pattern));
+			return trimmed.matches("\\d+") ? builder.or(text, builder.equal(user.get("id"), Long.valueOf(trimmed))) : text;
+		};
 	}
 
 	public static Specification<Claim> createdById(Long userId) {

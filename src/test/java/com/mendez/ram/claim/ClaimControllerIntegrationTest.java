@@ -190,6 +190,33 @@ class ClaimControllerIntegrationTest {
 	}
 
 	@Test
+	void managerWorkflowRecordsAssignmentEditCommentAndStatusHistory() throws Exception {
+		String token = accessToken("manager@local.dev", "DevManager123!");
+		MvcResult created = createClaim(token, "Workflow history").andExpect(status().isCreated()).andReturn();
+		Long id = extractClaimId(created); Long version = extractLong(created, "version");
+		MvcResult reviewers = mockMvc.perform(get("/api/v1/claims/reviewers").header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isOk()).andReturn();
+		long reviewerId = objectMapper.readTree(reviewers.getResponse().getContentAsString()).get(0).get("id").asLong();
+		MvcResult assigned = mockMvc.perform(patch("/api/v1/claims/" + id + "/assignment").header(HttpHeaders.AUTHORIZATION, bearer(token))
+				.contentType(MediaType.APPLICATION_JSON).content("{\"assignedToId\":" + reviewerId + ",\"version\":" + version + "}"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.assignedToId").value(reviewerId)).andReturn();
+		version = extractLong(assigned, "version");
+		MvcResult edited = mockMvc.perform(put("/api/v1/claims/" + id).header(HttpHeaders.AUTHORIZATION, bearer(token))
+				.contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"Workflow edited\",\"description\":\"Backend workflow\",\"priority\":\"HIGH\",\"version\":" + version + "}"))
+				.andExpect(status().isOk()).andReturn();
+		version = extractLong(edited, "version");
+		mockMvc.perform(post("/api/v1/claims/" + id + "/comments").header(HttpHeaders.AUTHORIZATION, bearer(token))
+				.contentType(MediaType.APPLICATION_JSON).content("{\"body\":\"Internal review note\"}"))
+				.andExpect(status().isCreated()).andExpect(jsonPath("$.body").value("Internal review note"));
+		changeStatus(token, id, ClaimStatus.REGISTERED, version).andExpect(status().isOk());
+		mockMvc.perform(get("/api/v1/claims/" + id + "/history").header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isOk()).andExpect(jsonPath("$[0].eventType").value("CREATED"))
+				.andExpect(jsonPath("$[?(@.eventType == 'ASSIGNED')]").exists())
+				.andExpect(jsonPath("$[?(@.eventType == 'PRIORITY_CHANGED')]").exists())
+				.andExpect(jsonPath("$[?(@.eventType == 'STATUS_CHANGED')]").exists());
+	}
+
+	@Test
 	void validationAndNotFoundUseProblemDetails() throws Exception {
 		String adminToken = accessToken("admin@local.dev", "DevAdmin123!");
 

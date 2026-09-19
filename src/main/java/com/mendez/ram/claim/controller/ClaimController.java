@@ -13,6 +13,9 @@ import com.mendez.ram.claim.dto.CreateClaimRequest;
 import com.mendez.ram.claim.dto.PageResponse;
 import com.mendez.ram.claim.dto.UpdateClaimRequest;
 import com.mendez.ram.claim.entity.ClaimStatus;
+import com.mendez.ram.claim.entity.ClaimPriority;
+import com.mendez.ram.claim.dto.*;
+import java.util.List;
 import com.mendez.ram.claim.service.ClaimService;
 import com.mendez.ram.config.OpenApiConfig;
 import com.mendez.ram.exception.ApiException;
@@ -53,6 +56,8 @@ public class ClaimController {
 			"reference", "reference",
 			"title", "title",
 			"status", "status",
+			"priority", "priority",
+			"dueAt", "dueAt",
 			"createdAt", "createdAt",
 			"updatedAt", "updatedAt",
 			"createdBy", "createdBy.username");
@@ -71,6 +76,9 @@ public class ClaimController {
 			@RequestParam(required = false) ClaimStatus status,
 			@RequestParam(required = false) String reference,
 			@RequestParam(required = false) String createdBy,
+			@RequestParam(required = false) String assignedTo,
+			@RequestParam(required = false) ClaimPriority priority,
+			@RequestParam(required = false) Boolean overdue,
 			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate createdFrom,
 			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate createdTo,
 			@RequestParam(defaultValue = "" + DEFAULT_PAGE) int page,
@@ -79,9 +87,29 @@ public class ClaimController {
 			@AuthenticationPrincipal AuthenticatedUser principal) {
 		validateDateRange(createdFrom, createdTo);
 		ClaimSearchCriteria criteria = new ClaimSearchCriteria(
-				search, status, reference, createdBy, createdFrom, createdTo);
+				search, status, reference, createdBy, assignedTo, priority, overdue, createdFrom, createdTo);
 		return claimService.findAll(criteria, pageable(page, size, sort), principal);
 	}
+
+	@PatchMapping("/{id}/assignment")
+	@PreAuthorize("hasAnyAuthority('PERM_CLAIM_REVIEW','PERM_CLAIM_ADMIN')")
+	public ClaimResponse assign(@PathVariable Long id, @Valid @RequestBody AssignClaimRequest request, @AuthenticationPrincipal AuthenticatedUser principal) {
+		return claimService.assign(id, request, principal);
+	}
+
+	@GetMapping("/{id}/history") @PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
+	public List<ClaimHistoryResponse> history(@PathVariable Long id, @AuthenticationPrincipal AuthenticatedUser principal) { return claimService.history(id, principal); }
+
+	@GetMapping("/{id}/comments") @PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
+	public List<ClaimCommentResponse> comments(@PathVariable Long id, @AuthenticationPrincipal AuthenticatedUser principal) { return claimService.comments(id, principal); }
+
+	@PostMapping("/{id}/comments") @PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
+	public ResponseEntity<ClaimCommentResponse> comment(@PathVariable Long id, @Valid @RequestBody CreateClaimCommentRequest request, @AuthenticationPrincipal AuthenticatedUser principal) {
+		return ResponseEntity.status(HttpStatus.CREATED).body(claimService.comment(id, request, principal));
+	}
+
+	@GetMapping("/reviewers") @PreAuthorize("hasAnyAuthority('PERM_CLAIM_REVIEW','PERM_CLAIM_ADMIN')")
+	public List<ReviewerResponse> reviewers(@AuthenticationPrincipal AuthenticatedUser principal) { return claimService.reviewers(principal); }
 
 	@GetMapping("/{id}")
 	@PreAuthorize("hasAuthority('PERM_CLAIM_READ')")

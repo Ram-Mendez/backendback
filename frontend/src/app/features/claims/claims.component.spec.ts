@@ -60,6 +60,7 @@ describe('ClaimsComponent', () => {
   });
 
   afterEach(() => {
+    httpMock.match((request) => /\/(comments|history|reviewers)$/.test(request.url)).forEach((request) => request.flush([]));
     httpMock.verify({ ignoreCancelled: true });
   });
 

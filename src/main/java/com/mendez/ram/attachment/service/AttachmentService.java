@@ -25,6 +25,7 @@ import com.mendez.ram.attachment.storage.StoreAttachmentCommand;
 import com.mendez.ram.attachment.storage.StoredAttachment;
 import com.mendez.ram.attachment.storage.StoredAttachmentResource;
 import com.mendez.ram.claim.entity.Claim;
+import com.mendez.ram.claim.entity.ClaimHistoryEventType;
 import com.mendez.ram.claim.service.ClaimService;
 import com.mendez.ram.exception.ApiException;
 import com.mendez.ram.security.AuthenticatedUser;
@@ -123,16 +124,19 @@ public class AttachmentService {
 		claimService.requireViewableClaim(claimId, principal);
 		ClaimAttachment attachment = findAttachment(claimId, attachmentId);
 		StoredAttachmentResource resource = attachmentStorage.load(attachment.getStorageKey());
+		LOGGER.info("Attachment {} downloaded from claim {} by user {}", attachmentId, claimId, principal.id());
 		return new AttachmentDownload(attachment, resource.inputStream(), resource.sizeBytes());
 	}
 
 	@Transactional
 	public void delete(Long claimId, UUID attachmentId, AuthenticatedUser principal) {
-		claimService.requireEditableClaimLocked(claimId, principal);
+		Claim claim = claimService.requireEditableClaimLocked(claimId, principal);
 		ClaimAttachment attachment = findAttachment(claimId, attachmentId);
+		AuthUser actor = findActor(principal);
 		String storageKey = attachment.getStorageKey();
 		attachmentRepository.delete(attachment);
 		attachmentRepository.flush();
+		claimService.recordAttachmentEvent(claim, actor, ClaimHistoryEventType.ATTACHMENT_DELETED, "attachmentId=" + attachmentId);
 		deleteStorageAfterCommit(storageKey, attachment.getId(), claimId);
 		LOGGER.info("Attachment {} deleted from claim {} by user {}", attachment.getId(), claimId, principal.id());
 	}
@@ -161,6 +165,7 @@ public class AttachmentService {
 				actor,
 				Instant.now(clock));
 		ClaimAttachment saved = attachmentRepository.save(attachment);
+		claimService.recordAttachmentEvent(claim, actor, ClaimHistoryEventType.ATTACHMENT_UPLOADED, "attachmentId=" + saved.getId() + ",path=" + saved.getRelativePath());
 		usedRelativePaths.add(relativePath);
 		LOGGER.info("Attachment {} uploaded to claim {} by user {} path={} sizeBytes={}",
 				saved.getId(), claim.getId(), actor.getId(), saved.getRelativePath(), saved.getSizeBytes());
@@ -287,7 +292,8 @@ public class AttachmentService {
 		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
 			@Override
 			public void afterCompletion(int status) {
-				if (status != STATUS_COMMITTED) {
+				if (status != STATUS_COMMITTED
+						|| (status == STATUS_COMMITTED && storedStorageKeys.stream().anyMatch(key -> key.endsWith(".csv")))) {
 					cleanupStoredKeys(claimId, storedStorageKeys);
 				}
 			}
