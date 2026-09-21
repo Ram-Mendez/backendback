@@ -49,3 +49,6 @@ frontend/.angular/
 target/
 .idea/
 /storage/
+
+.codex/
+AGENTS.md
