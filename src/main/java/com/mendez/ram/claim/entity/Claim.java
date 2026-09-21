@@ -75,7 +75,14 @@ public class Claim {
 	protected Claim() {
 	}
 
-	public Claim(String title, String description, String claimantName, ClaimPriority priority, Instant dueAt, AuthUser createdBy, Instant now) {
+	public Claim(
+			String title,
+			String description,
+			String claimantName,
+			ClaimPriority priority,
+			Instant dueAt,
+			AuthUser createdBy,
+			Instant creationTime) {
 		this.title = title;
 		this.description = description;
 		this.claimantName = claimantName;
@@ -83,11 +90,24 @@ public class Claim {
 		this.priority = priority;
 		this.dueAt = dueAt;
 		this.createdBy = createdBy;
-		this.createdAt = now;
-		this.updatedAt = now;
+		this.createdAt = creationTime;
+		this.updatedAt = creationTime;
 	}
-	public Claim(String title, String description, String claimantName, AuthUser createdBy, Instant now) {
-		this(title, description, claimantName, ClaimPriority.NORMAL, null, createdBy, now);
+
+	public Claim(
+			String title,
+			String description,
+			String claimantName,
+			AuthUser createdBy,
+			Instant creationTime) {
+		this(
+				title,
+				description,
+				claimantName,
+				ClaimPriority.NORMAL,
+				null,
+				createdBy,
+				creationTime);
 	}
 
 	public Long getId() {
@@ -109,10 +129,22 @@ public class Claim {
 	public ClaimStatus getStatus() {
 		return status;
 	}
-	public ClaimPriority getPriority() { return priority; }
-	public Instant getDueAt() { return dueAt; }
-	public AuthUser getAssignedTo() { return assignedTo; }
-	public Instant getAssignedAt() { return assignedAt; }
+
+	public ClaimPriority getPriority() {
+		return priority;
+	}
+
+	public Instant getDueAt() {
+		return dueAt;
+	}
+
+	public AuthUser getAssignedTo() {
+		return assignedTo;
+	}
+
+	public Instant getAssignedAt() {
+		return assignedAt;
+	}
 
 	public String getClaimantName() {
 		return claimantName;
@@ -138,23 +170,33 @@ public class Claim {
 		return version;
 	}
 
-	public void updateDetails(String title, String description, String claimantName, ClaimPriority priority, Instant dueAt, AuthUser updatedBy, Instant now) {
+	public void updateDetails(
+			String title,
+			String description,
+			String claimantName,
+			ClaimPriority priority,
+			Instant dueAt,
+			AuthUser updatedBy,
+			Instant updateTime) {
 		this.title = title;
 		this.description = description;
 		this.claimantName = claimantName;
 		this.priority = priority;
 		this.dueAt = dueAt;
 		this.updatedBy = updatedBy;
-		this.updatedAt = now;
+		this.updatedAt = updateTime;
 	}
 
-	public void assignTo(AuthUser assignee, AuthUser updatedBy, Instant now) {
-		this.assignedTo = assignee; this.assignedAt = now; this.updatedBy = updatedBy; this.updatedAt = now;
-	}
-
-	public void changeStatus(ClaimStatus status, AuthUser updatedBy, Instant now) {
-		this.status = status;
+	public void assignTo(AuthUser assignee, AuthUser updatedBy, Instant assignmentTime) {
+		this.assignedTo = assignee;
+		this.assignedAt = assignmentTime;
 		this.updatedBy = updatedBy;
-		this.updatedAt = now;
+		this.updatedAt = assignmentTime;
+	}
+
+	public void changeStatus(ClaimStatus newStatus, AuthUser updatedBy, Instant statusChangeTime) {
+		this.status = newStatus;
+		this.updatedBy = updatedBy;
+		this.updatedAt = statusChangeTime;
 	}
 }

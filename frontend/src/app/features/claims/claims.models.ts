@@ -76,9 +76,28 @@ export interface ClaimFilters {
   sort?: string;
 }
 
-export interface ClaimComment { id: number; body: string; authorId: number; authorUsername: string; createdAt: string; }
-export interface ClaimHistory { id: number; eventType: string; eventData: string | null; actorId: number; actorUsername: string; occurredAt: string; }
-export interface Reviewer { id: number; username: string; email: string; }
+export interface ClaimComment {
+  id: number;
+  body: string;
+  authorId: number;
+  authorUsername: string;
+  createdAt: string;
+}
+
+export interface ClaimHistory {
+  id: number;
+  eventType: string;
+  eventData: string | null;
+  actorId: number;
+  actorUsername: string;
+  occurredAt: string;
+}
+
+export interface Reviewer {
+  id: number;
+  username: string;
+  email: string;
+}
 
 export interface PageResponse<T> {
   content: T[];

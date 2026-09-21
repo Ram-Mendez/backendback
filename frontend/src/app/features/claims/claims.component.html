@@ -38,7 +38,7 @@
           <h2>Filtros</h2>
           <p>{{ appliedFilterCount() }} criterios activos</p>
         </div>
-        @if (loading() && hasClaims()) {
+        @if (isClaimListLoading() && hasClaims()) {
           <span class="loading-pill" aria-live="polite">Actualizando...</span>
         }
       </div>
@@ -58,16 +58,30 @@
           Creado por
           <input id="filter-created-by" type="search" formControlName="createdBy" placeholder="Usuario">
         </label>
-        <label class="field">Responsable<input type="search" formControlName="assignedTo" placeholder="Usuario"></label>
-        <label class="field">Prioridad<select formControlName="priority"><option value="">Todas</option>@for (priority of priorities; track priority) { <option [value]="priority">{{ priority }}</option> }</select></label>
-        <label class="field"><input type="checkbox" formControlName="overdue"> Solo vencidas</label>
+        <label class="field">
+          Responsable
+          <input type="search" formControlName="assignedTo" placeholder="Usuario">
+        </label>
+        <label class="field">
+          Prioridad
+          <select formControlName="priority">
+            <option value="">Todas</option>
+            @for (priority of priorities; track priority) {
+              <option [value]="priority">{{ priority }}</option>
+            }
+          </select>
+        </label>
+        <label class="field">
+          <input type="checkbox" formControlName="overdue">
+          Solo vencidas
+        </label>
 
         <label class="field" for="filter-status">
           Estado
           <select id="filter-status" formControlName="status">
             <option value="">Todos</option>
             @for (status of statuses; track status) {
-              <option [value]="status">{{ labelFor(status) }}</option>
+              <option [value]="status">{{ claimStatusLabel(status) }}</option>
             }
           </select>
         </label>
@@ -89,14 +103,14 @@
       </div>
     </form>
 
-    @if (errorMessage() && hasClaims()) {
+    @if (claimListErrorMessage() && hasClaims()) {
       <div class="alert" role="alert">
-        <span>{{ errorMessage() }}</span>
-        <button type="button" (click)="retryLoad()">Reintentar</button>
+        <span>{{ claimListErrorMessage() }}</span>
+        <button type="button" (click)="retryClaimListLoad()">Reintentar</button>
       </div>
     }
 
-    <section class="table-panel" aria-labelledby="claims-table-title" [attr.aria-busy]="loading()">
+    <section class="table-panel" aria-labelledby="claims-table-title" [attr.aria-busy]="isClaimListLoading()">
       <div class="table-panel-header">
         <div>
           <h2 id="claims-table-title">Listado de reclamaciones</h2>
@@ -118,7 +132,8 @@
                 <th>Referencia</th>
                 <th>Título</th>
                 <th>Estado</th>
-                <th>Prioridad</th><th>Responsable</th>
+                <th>Prioridad</th>
+                <th>Responsable</th>
                 <th>Creado por</th>
                 <th>Fecha creación</th>
                 <th>Última actualización</th>
@@ -143,13 +158,13 @@
             </tbody>
           </table>
         </div>
-      } @else if (errorMessage() && !hasClaims()) {
+      } @else if (claimListErrorMessage() && !hasClaims()) {
         <div class="state state-error" role="alert">
           <span class="state-icon" aria-hidden="true">!</span>
           <h2>Error al cargar</h2>
-          <p>{{ errorMessage() }}</p>
+          <p>{{ claimListErrorMessage() }}</p>
           <div class="state-actions">
-            <button class="primary-button compact" type="button" (click)="retryLoad()">Reintentar</button>
+            <button class="primary-button compact" type="button" (click)="retryClaimListLoad()">Reintentar</button>
             <button class="secondary-button compact" type="button" (click)="resetState()">Restablecer</button>
           </div>
         </div>
@@ -176,7 +191,8 @@
                 <th scope="col">Referencia</th>
                 <th scope="col">Título</th>
                 <th scope="col">Estado</th>
-                <th scope="col">Prioridad</th><th scope="col">Responsable</th>
+                <th scope="col">Prioridad</th>
+                <th scope="col">Responsable</th>
                 <th scope="col">Creado por</th>
                 <th scope="col">Fecha creación</th>
                 <th scope="col">Última actualización</th>
@@ -184,26 +200,27 @@
               </tr>
             </thead>
             <tbody>
-              @for (claim of claims(); track claim.id) {
+              @for (claim of claimSummaries(); track claim.id) {
                 <tr
                   tabindex="0"
                   role="button"
-                  [class.selected]="isSelected(claim.id)"
-                  [attr.aria-selected]="isSelected(claim.id)"
+                  [class.selected]="isClaimSelected(claim.id)"
+                  [attr.aria-selected]="isClaimSelected(claim.id)"
                   [attr.aria-label]="'Abrir detalle de ' + claim.reference"
                   (click)="openDetail(claim)"
-                  (keydown)="handleRowKeydown($event, claim)">
+                  (keydown)="openClaimDetailOnRowKeydown($event, claim)">
                   <td>
                     <strong class="claim-reference">{{ claim.reference }}</strong>
                   </td>
-                  <td>{{ claim.priority ?? 'NORMAL' }}</td><td>{{ claim.assignedToUsername ?? 'Sin asignar' }}</td>
+                  <td>{{ claim.priority ?? 'NORMAL' }}</td>
+                  <td>{{ claim.assignedToUsername ?? 'Sin asignar' }}</td>
                   <td>
                     <strong class="claim-title">{{ claim.title }}</strong>
                   </td>
                   <td>
-                    <span [class]="statusClass(claim.status)">
+                    <span [class]="claimStatusClass(claim.status)">
                       <span class="status-dot" aria-hidden="true"></span>
-                      {{ labelFor(claim.status) }}
+                      {{ claimStatusLabel(claim.status) }}
                     </span>
                   </td>
                   <td>
@@ -227,7 +244,12 @@
                   <td>
                     <div class="actions">
                       @if (canEditClaim(claim)) {
-                        <button class="link-button" type="button" (click)="$event.stopPropagation(); openEdit(claim)" [disabled]="saving() || detailLoading()">
+                        <button
+                          class="link-button"
+                          type="button"
+                          (click)="openClaimEditFromList($event, claim)"
+                          [disabled]="isClaimSaveInProgress() || isClaimDetailLoading()"
+                        >
                           Editar
                         </button>
                       }
@@ -247,7 +269,7 @@
         <span>Página {{ pageNumber() + 1 }} de {{ totalPages() || 1 }}</span>
         <label for="page-size">
           Filas
-          <select id="page-size" [value]="pageSize()" (change)="changePageSizeValue($event)" [disabled]="loading()">
+          <select id="page-size" [value]="pageSize()" (change)="changePageSize($event)" [disabled]="isClaimListLoading()">
             @for (size of pageSizeOptions; track size) {
               <option [value]="size">{{ size }}</option>
             }
@@ -256,8 +278,8 @@
       </div>
 
       <div class="pagination-actions">
-        <button type="button" (click)="previousPage()" [disabled]="!canGoPrevious()">Anterior</button>
-        <button type="button" (click)="nextPage()" [disabled]="!canGoNext()">Siguiente</button>
+        <button type="button" (click)="previousPage()" [disabled]="!canGoToPreviousClaimPage()">Anterior</button>
+        <button type="button" (click)="nextPage()" [disabled]="!canGoToNextClaimPage()">Siguiente</button>
       </div>
     </footer>
   </section>
@@ -292,7 +314,7 @@
         <button class="icon-button" type="button" (click)="closeDrawer()" aria-label="Cerrar">x</button>
       </div>
 
-      @if (detailLoading()) {
+      @if (isClaimDetailLoading()) {
         <div class="drawer-loading" aria-live="polite">
           <span class="skeleton-line wide"></span>
           <span class="skeleton-line medium"></span>
@@ -302,13 +324,13 @@
           <span class="skeleton-line short"></span>
         </div>
       } @else if (drawerMode() === 'detail') {
-        @if (detailErrorMessage()) {
+        @if (claimDetailErrorMessage()) {
           <div class="state state-error drawer-state" role="alert">
             <span class="state-icon" aria-hidden="true">!</span>
             <h2>Error al cargar</h2>
-            <p>{{ detailErrorMessage() }}</p>
+            <p>{{ claimDetailErrorMessage() }}</p>
             <div class="state-actions">
-              <button class="primary-button compact" type="button" (click)="retryDrawerLoad()">Reintentar</button>
+              <button class="primary-button compact" type="button" (click)="retryClaimDetailLoad()">Reintentar</button>
               <button class="secondary-button compact" type="button" (click)="closeDrawer()">Cerrar</button>
             </div>
           </div>
@@ -319,9 +341,9 @@
                 <span class="claim-reference">{{ detail.reference }}</span>
                 <h3>{{ detail.title }}</h3>
               </div>
-              <span [class]="statusClass(detail.status)">
+              <span [class]="claimStatusClass(detail.status)">
                 <span class="status-dot" aria-hidden="true"></span>
-                {{ labelFor(detail.status) }}
+                {{ claimStatusLabel(detail.status) }}
               </span>
             </header>
 
@@ -362,10 +384,58 @@
             </dl>
 
             @if (canReviewClaims()) {
-              <section class="detail-section"><h3>Asignación</h3><select [formControl]="assigneeControl"><option [ngValue]="null">Selecciona responsable</option>@for (reviewer of reviewers(); track reviewer.id) { <option [ngValue]="reviewer.id">{{ reviewer.username }}</option> }</select><button type="button" class="secondary-button compact" (click)="assignSelected()">Asignar</button></section>
+              <section class="detail-section">
+                <h3>Asignación</h3>
+                <select [formControl]="selectedAssigneeControl">
+                  <option [ngValue]="null">Selecciona responsable</option>
+                  @for (reviewer of eligibleReviewers(); track reviewer.id) {
+                    <option [ngValue]="reviewer.id">{{ reviewer.username }}</option>
+                  }
+                </select>
+                <button
+                  type="button"
+                  class="secondary-button compact"
+                  (click)="assignSelectedClaim()"
+                >
+                  Asignar
+                </button>
+              </section>
             }
-            <section class="detail-section"><h3>Comentarios internos</h3>@for (comment of comments(); track comment.id) { <p><strong>{{ comment.authorUsername }}</strong> · {{ comment.createdAt | date:'dd/MM/yyyy HH:mm' }}<br>{{ comment.body }}</p> }<textarea [formControl]="commentControl" rows="2" placeholder="Añadir comentario interno"></textarea><button type="button" class="secondary-button compact" (click)="addComment()">Comentar</button></section>
-            <section class="detail-section"><h3>Historial</h3>@for (event of history(); track event.id) { <p><strong>{{ event.eventType }}</strong> · {{ event.actorUsername }} · {{ event.occurredAt | date:'dd/MM/yyyy HH:mm' }}<br>{{ event.eventData }}</p> }</section>
+            <section class="detail-section">
+              <h3>Comentarios internos</h3>
+              @for (comment of claimComments(); track comment.id) {
+                <p>
+                  <strong>{{ comment.authorUsername }}</strong>
+                  · {{ comment.createdAt | date:'dd/MM/yyyy HH:mm' }}
+                  <br>
+                  {{ comment.body }}
+                </p>
+              }
+              <textarea
+                [formControl]="newCommentControl"
+                rows="2"
+                placeholder="Añadir comentario interno"
+              ></textarea>
+              <button
+                type="button"
+                class="secondary-button compact"
+                (click)="addClaimComment()"
+              >
+                Comentar
+              </button>
+            </section>
+            <section class="detail-section">
+              <h3>Historial</h3>
+              @for (historyEntry of claimHistoryEntries(); track historyEntry.id) {
+                <p>
+                  <strong>{{ historyEntry.eventType }}</strong>
+                  · {{ historyEntry.actorUsername }}
+                  · {{ historyEntry.occurredAt | date:'dd/MM/yyyy HH:mm' }}
+                  <br>
+                  {{ historyEntry.eventData }}
+                </p>
+              }
+            </section>
 
             <app-claim-attachments [claimId]="detail.id" [editable]="canEditClaim(detail)"></app-claim-attachments>
 
@@ -380,16 +450,21 @@
         <div class="state state-error drawer-state" role="alert">
           <span class="state-icon" aria-hidden="true">!</span>
           <h2>Error al cargar</h2>
-          @if (formErrorMessage()) {
-            <p>{{ formErrorMessage() }}</p>
+          @if (claimFormErrorMessage()) {
+            <p>{{ claimFormErrorMessage() }}</p>
           }
           <div class="state-actions">
-            <button class="primary-button compact" type="button" (click)="retryDrawerLoad()">Reintentar</button>
+            <button class="primary-button compact" type="button" (click)="retryClaimDetailLoad()">Reintentar</button>
             <button class="secondary-button compact" type="button" (click)="closeDrawer()">Cerrar</button>
           </div>
         </div>
       } @else {
-        <form [formGroup]="claimForm" (ngSubmit)="submitClaim()" [attr.aria-busy]="formBusy()" novalidate>
+        <form
+          [formGroup]="claimForm"
+          (ngSubmit)="saveClaim()"
+          [attr.aria-busy]="isClaimFormBusy()"
+          novalidate
+        >
           <div class="field">
             <label for="title">Título</label>
             <input
@@ -424,8 +499,18 @@
               }
             </div>
           </div>
-          <div class="field"><label for="priority">Prioridad</label><select id="priority" formControlName="priority">@for (priority of priorities; track priority) { <option [value]="priority">{{ priority }}</option> }</select></div>
-          <div class="field"><label for="due-at">Fecha límite</label><input id="due-at" type="datetime-local" formControlName="dueAt"></div>
+          <div class="field">
+            <label for="priority">Prioridad</label>
+            <select id="priority" formControlName="priority">
+              @for (priority of priorities; track priority) {
+                <option [value]="priority">{{ priority }}</option>
+              }
+            </select>
+          </div>
+          <div class="field">
+            <label for="due-at">Fecha límite</label>
+            <input id="due-at" type="datetime-local" formControlName="dueAt">
+          </div>
 
           <div class="field">
             <label for="description">Descripción</label>
@@ -459,13 +544,17 @@
               </div>
               <div class="status-editor-controls">
                 <label class="sr-only" for="claim-status">Estado</label>
-                <select id="claim-status" [formControl]="statusControl" [disabled]="statusSaving()">
+                <select
+                  id="claim-status"
+                  [formControl]="claimStatusControl"
+                  [disabled]="isClaimStatusUpdateInProgress()"
+                >
                   @for (status of statusOptionsFor(detail); track status) {
-                    <option [value]="status">{{ labelFor(status) }}</option>
+                    <option [value]="status">{{ claimStatusLabel(status) }}</option>
                   }
                 </select>
-                <button class="secondary-button compact" type="button" (click)="updateStatus()" [disabled]="statusSaving() || !hasPendingStatusChange()">
-                  {{ statusSaving() ? 'Actualizando...' : 'Actualizar estado' }}
+                <button class="secondary-button compact" type="button" (click)="updateSelectedClaimStatus()" [disabled]="isClaimStatusUpdateInProgress() || !hasPendingStatusChange()">
+                  {{ isClaimStatusUpdateInProgress() ? 'Actualizando...' : 'Actualizar estado' }}
                 </button>
               </div>
             </section>
@@ -474,14 +563,14 @@
             <app-claim-attachments [claimId]="detail.id" [editable]="canEditClaim(detail)"></app-claim-attachments>
           }
 
-          @if (formErrorMessage()) {
-            <div class="alert drawer-alert" role="alert">{{ formErrorMessage() }}</div>
+          @if (claimFormErrorMessage()) {
+            <div class="alert drawer-alert" role="alert">{{ claimFormErrorMessage() }}</div>
           }
 
           <div class="form-actions">
-            <button class="secondary-button" type="button" (click)="closeDrawer()" [disabled]="saving()">Cancelar</button>
-            <button class="primary-button" type="submit" [disabled]="formBusy()">
-              {{ saving() ? 'Guardando...' : 'Guardar' }}
+            <button class="secondary-button" type="button" (click)="closeDrawer()" [disabled]="isClaimSaveInProgress()">Cancelar</button>
+            <button class="primary-button" type="submit" [disabled]="isClaimFormBusy()">
+              {{ isClaimSaveInProgress() ? 'Guardando...' : 'Guardar' }}
             </button>
           </div>
         </form>

@@ -1,6 +1,7 @@
 package com.mendez.ram.claim.dto;
 
 import java.time.Instant;
+
 import com.mendez.ram.claim.entity.ClaimPriority;
 
 import jakarta.validation.constraints.NotBlank;
@@ -12,5 +13,13 @@ public record CreateClaimRequest(
 		@Size(max = 160) String claimantName,
 		ClaimPriority priority,
 		Instant dueAt) {
-	public CreateClaimRequest(String title, String description, String claimantName) { this(title, description, claimantName, null, null); }
+
+	public CreateClaimRequest(String title, String description, String claimantName) {
+		this(
+				title,
+				description,
+				claimantName,
+				null,
+				null);
+	}
 }

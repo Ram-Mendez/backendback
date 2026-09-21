@@ -23,35 +23,38 @@ public class AttachmentPathSanitizer {
 			"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9");
 
 	public SanitizedAttachmentPath sanitize(String submittedRelativePath, String submittedFilename) {
-		String candidate = hasText(submittedRelativePath) ? submittedRelativePath : submittedFilename;
-		if (!hasText(candidate)) {
-			throw invalidPath();
+		String submittedPathCandidate = hasText(submittedRelativePath) ? submittedRelativePath : submittedFilename;
+		if (!hasText(submittedPathCandidate)) {
+			throw invalidAttachmentPath();
 		}
 
-		String normalized = Normalizer.normalize(candidate.trim().replace('\\', '/'), Normalizer.Form.NFKC);
-		if (normalized.startsWith("/") || normalized.startsWith("~") || WINDOWS_ABSOLUTE_PATH.matcher(normalized).matches()
-				|| CONTROL_CHARS.matcher(normalized).find()) {
-			throw invalidPath();
+		String normalizedPath = Normalizer.normalize(
+				submittedPathCandidate.trim().replace('\\', '/'),
+				Normalizer.Form.NFKC);
+		if (normalizedPath.startsWith("/") || normalizedPath.startsWith("~")
+				|| WINDOWS_ABSOLUTE_PATH.matcher(normalizedPath).matches()
+				|| CONTROL_CHARS.matcher(normalizedPath).find()) {
+			throw invalidAttachmentPath();
 		}
 
-		String[] parts = normalized.split("/");
-		StringBuilder sanitized = new StringBuilder();
-		for (String part : parts) {
-			if (!hasText(part) || ".".equals(part) || "..".equals(part)) {
-				throw invalidPath();
+		String[] pathSegments = normalizedPath.split("/");
+		StringBuilder sanitizedPathBuilder = new StringBuilder();
+		for (String pathSegment : pathSegments) {
+			if (!hasText(pathSegment) || ".".equals(pathSegment) || "..".equals(pathSegment)) {
+				throw invalidAttachmentPath();
 			}
-			String sanitizedPart = sanitizeSegment(part);
-			if (sanitized.length() > 0) {
-				sanitized.append('/');
+			String sanitizedSegment = sanitizeSegment(pathSegment);
+			if (sanitizedPathBuilder.length() > 0) {
+				sanitizedPathBuilder.append('/');
 			}
-			sanitized.append(sanitizedPart);
+			sanitizedPathBuilder.append(sanitizedSegment);
 		}
 
-		if (sanitized.isEmpty() || sanitized.length() > MAX_PATH_LENGTH) {
-			throw invalidPath();
+		if (sanitizedPathBuilder.isEmpty() || sanitizedPathBuilder.length() > MAX_PATH_LENGTH) {
+			throw invalidAttachmentPath();
 		}
 
-		String relativePath = sanitized.toString();
+		String relativePath = sanitizedPathBuilder.toString();
 		int separatorIndex = relativePath.lastIndexOf('/');
 		String fileName = separatorIndex >= 0 ? relativePath.substring(separatorIndex + 1) : relativePath;
 		return new SanitizedAttachmentPath(fileName, relativePath);
@@ -79,31 +82,31 @@ public class AttachmentPathSanitizer {
 		return sanitized;
 	}
 
-	private static String appendReservedNameSuffix(String value) {
-		int dotIndex = value.indexOf('.');
+	private static String appendReservedNameSuffix(String fileName) {
+		int dotIndex = fileName.indexOf('.');
 		if (dotIndex > 0) {
-			return value.substring(0, dotIndex) + "_" + value.substring(dotIndex);
+			return fileName.substring(0, dotIndex) + "_" + fileName.substring(dotIndex);
 		}
-		return value + "_";
+		return fileName + "_";
 	}
 
-	private static String trimTrailingDotsAndSpaces(String value) {
-		int end = value.length();
-		while (end > 0) {
-			char current = value.charAt(end - 1);
-			if (current != '.' && current != ' ') {
+	private static String trimTrailingDotsAndSpaces(String fileNameSegment) {
+		int trimmedEndIndex = fileNameSegment.length();
+		while (trimmedEndIndex > 0) {
+			char trailingCharacter = fileNameSegment.charAt(trimmedEndIndex - 1);
+			if (trailingCharacter != '.' && trailingCharacter != ' ') {
 				break;
 			}
-			end--;
+			trimmedEndIndex--;
 		}
-		return value.substring(0, end);
+		return fileNameSegment.substring(0, trimmedEndIndex);
 	}
 
-	private static boolean hasText(String value) {
-		return value != null && !value.isBlank();
+	private static boolean hasText(String text) {
+		return text != null && !text.isBlank();
 	}
 
-	private static ApiException invalidPath() {
+	private static ApiException invalidAttachmentPath() {
 		return new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ATTACHMENT_PATH",
 				"La ruta del adjunto no es valida.");
 	}

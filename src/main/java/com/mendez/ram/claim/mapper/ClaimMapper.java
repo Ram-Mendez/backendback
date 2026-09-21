@@ -14,35 +14,36 @@ import org.springframework.stereotype.Component;
 @Component
 public class ClaimMapper {
 
-	public Claim toEntity(CreateClaimRequest request, AuthUser createdBy, Instant now) {
+	public Claim toClaimEntity(CreateClaimRequest request, AuthUser createdBy, Instant creationTime) {
 		return new Claim(
-				trimRequired(request.title()),
-				trimRequired(request.description()),
-				trimToNull(request.claimantName()),
+				trimRequiredText(request.title()),
+				trimRequiredText(request.description()),
+				trimOptionalTextToNull(request.claimantName()),
 				request.priority() == null ? ClaimPriority.NORMAL : request.priority(),
 				request.dueAt(),
 				createdBy,
-				now);
+				creationTime);
 	}
 
-	public void updateEntity(Claim claim, UpdateClaimRequest request, AuthUser updatedBy, Instant now) {
+	public void updateClaimEntity(Claim claim, UpdateClaimRequest request, AuthUser updatedBy, Instant updateTime) {
 		claim.updateDetails(
-				trimRequired(request.title()),
-				trimRequired(request.description()),
-				trimToNull(request.claimantName()),
+				trimRequiredText(request.title()),
+				trimRequiredText(request.description()),
+				trimOptionalTextToNull(request.claimantName()),
 				request.priority() == null ? claim.getPriority() : request.priority(),
 				request.dueAt(),
 				updatedBy,
-				now);
+				updateTime);
 	}
 
-	public ClaimSummaryResponse toSummaryResponse(Claim claim) {
+	public ClaimSummaryResponse toClaimSummaryResponse(Claim claim) {
 		return new ClaimSummaryResponse(
 				claim.getId(),
 				claim.getReference(),
 				claim.getTitle(),
 				claim.getStatus(),
-				claim.getPriority(), claim.getDueAt(),
+				claim.getPriority(),
+				claim.getDueAt(),
 				claim.getAssignedTo() == null ? null : claim.getAssignedTo().getId(),
 				claim.getAssignedTo() == null ? null : claim.getAssignedTo().getUsername(),
 				claim.getCreatedBy().getId(),
@@ -51,14 +52,15 @@ public class ClaimMapper {
 				claim.getUpdatedAt());
 	}
 
-	public ClaimResponse toResponse(Claim claim) {
+	public ClaimResponse toClaimResponse(Claim claim) {
 		return new ClaimResponse(
 				claim.getId(),
 				claim.getReference(),
 				claim.getTitle(),
 				claim.getDescription(),
 				claim.getStatus(),
-				claim.getPriority(), claim.getDueAt(),
+				claim.getPriority(),
+				claim.getDueAt(),
 				claim.getClaimantName(),
 				claim.getAssignedTo() == null ? null : claim.getAssignedTo().getId(),
 				claim.getAssignedTo() == null ? null : claim.getAssignedTo().getUsername(),
@@ -72,14 +74,14 @@ public class ClaimMapper {
 				claim.getVersion());
 	}
 
-	private static String trimRequired(String value) {
-		return value.trim();
+	private static String trimRequiredText(String text) {
+		return text.trim();
 	}
 
-	private static String trimToNull(String value) {
-		if (value == null || value.isBlank()) {
+	private static String trimOptionalTextToNull(String text) {
+		if (text == null || text.isBlank()) {
 			return null;
 		}
-		return value.trim();
+		return text.trim();
 	}
 }

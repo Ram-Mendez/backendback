@@ -58,7 +58,7 @@ class ClaimControllerTest {
 
 	@Test
 	void getReturnsStablePagedResponse() throws Exception {
-		when(claimService.findAll(any(), any(Pageable.class), any())).thenReturn(new PageResponse<>(
+		when(claimService.searchClaims(any(), any(Pageable.class), any())).thenReturn(new PageResponse<>(
 				List.of(new ClaimSummaryResponse(1L, "CLM-2026-000001", "Claim title",
 						ClaimStatus.DRAFT, 1L, "dev-user", NOW, NOW)),
 				0, 20, 1, 1, true, true));
@@ -75,7 +75,8 @@ class ClaimControllerTest {
 
 	@Test
 	void postCreatesClaimAndSetsLocation() throws Exception {
-		when(claimService.create(any(), any())).thenReturn(response(10L, "CLM-2026-000010", ClaimStatus.DRAFT));
+		when(claimService.createClaim(any(), any()))
+				.thenReturn(claimResponse(10L, "CLM-2026-000010", ClaimStatus.DRAFT));
 
 		mockMvc.perform(post("/api/v1/claims")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -90,8 +91,8 @@ class ClaimControllerTest {
 
 	@Test
 	void putUpdatesClaim() throws Exception {
-		when(claimService.update(eq(10L), any(), any()))
-				.thenReturn(response(10L, "CLM-2026-000010", ClaimStatus.DRAFT));
+		when(claimService.updateClaim(eq(10L), any(), any()))
+				.thenReturn(claimResponse(10L, "CLM-2026-000010", ClaimStatus.DRAFT));
 
 		mockMvc.perform(put("/api/v1/claims/10")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -104,8 +105,8 @@ class ClaimControllerTest {
 
 	@Test
 	void patchChangesStatus() throws Exception {
-		when(claimService.changeStatus(eq(10L), any(), any()))
-				.thenReturn(response(10L, "CLM-2026-000010", ClaimStatus.REGISTERED));
+		when(claimService.updateClaimStatus(eq(10L), any(), any()))
+				.thenReturn(claimResponse(10L, "CLM-2026-000010", ClaimStatus.REGISTERED));
 
 		mockMvc.perform(patch("/api/v1/claims/10/status")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -123,7 +124,7 @@ class ClaimControllerTest {
 				.andExpect(jsonPath("$.code").value("INVALID_SORT_FIELD"));
 	}
 
-	private static ClaimResponse response(Long id, String reference, ClaimStatus status) {
+	private static ClaimResponse claimResponse(Long id, String reference, ClaimStatus status) {
 		return new ClaimResponse(
 				id,
 				reference,

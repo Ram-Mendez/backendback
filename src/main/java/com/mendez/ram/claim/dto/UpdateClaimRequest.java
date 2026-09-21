@@ -1,6 +1,7 @@
 package com.mendez.ram.claim.dto;
 
 import java.time.Instant;
+
 import com.mendez.ram.claim.entity.ClaimPriority;
 
 import jakarta.validation.constraints.NotBlank;
@@ -15,5 +16,18 @@ public record UpdateClaimRequest(
 		ClaimPriority priority,
 		Instant dueAt,
 		@NotNull @PositiveOrZero Long version) {
-	public UpdateClaimRequest(String title, String description, String claimantName, Long version) { this(title, description, claimantName, ClaimPriority.NORMAL, null, version); }
+
+	public UpdateClaimRequest(
+			String title,
+			String description,
+			String claimantName,
+			Long version) {
+		this(
+				title,
+				description,
+				claimantName,
+				ClaimPriority.NORMAL,
+				null,
+				version);
+	}
 }

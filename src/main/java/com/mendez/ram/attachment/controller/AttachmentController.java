@@ -47,60 +47,60 @@ public class AttachmentController {
 
 	@GetMapping
 	@PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
-	@Operation(summary = "List claim attachments")
-	public List<AttachmentResponse> findAll(@PathVariable Long claimId,
+	@Operation(summary = "List claim attachments", operationId = "findAll_1")
+	public List<AttachmentResponse> findClaimAttachments(@PathVariable Long claimId,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
-		return attachmentService.findAll(claimId, principal);
+		return attachmentService.findClaimAttachments(claimId, principal);
 	}
 
 	@GetMapping("/capabilities")
 	@PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
-	@Operation(summary = "Get claim attachment upload capabilities")
-	public AttachmentCapabilitiesResponse capabilities(@PathVariable Long claimId,
+	@Operation(summary = "Get claim attachment upload capabilities", operationId = "capabilities")
+	public AttachmentCapabilitiesResponse loadClaimAttachmentCapabilities(@PathVariable Long claimId,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
-		return attachmentService.capabilities(claimId, principal);
+		return attachmentService.loadClaimAttachmentCapabilities(claimId, principal);
 	}
 
 	@PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
 	@PreAuthorize("hasAuthority('PERM_CLAIM_UPDATE')")
-	@Operation(summary = "Upload one or more claim attachments")
-	public ResponseEntity<List<AttachmentResponse>> upload(
+	@Operation(summary = "Upload one or more claim attachments", operationId = "upload")
+	public ResponseEntity<List<AttachmentResponse>> uploadClaimAttachments(
 			@PathVariable Long claimId,
 			@RequestPart("files") List<MultipartFile> files,
 			@RequestParam(value = "relativePaths", required = false) List<String> relativePaths,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
 		return ResponseEntity.status(HttpStatus.CREATED)
-				.body(attachmentService.upload(claimId, files, relativePaths, principal));
+				.body(attachmentService.uploadClaimAttachments(claimId, files, relativePaths, principal));
 	}
 
 	@GetMapping("/{attachmentId}/content")
 	@PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
-	@Operation(summary = "Download a claim attachment")
-	public ResponseEntity<InputStreamResource> download(
+	@Operation(summary = "Download a claim attachment", operationId = "download")
+	public ResponseEntity<InputStreamResource> downloadClaimAttachment(
 			@PathVariable Long claimId,
 			@PathVariable UUID attachmentId,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
-		AttachmentDownload download = attachmentService.download(claimId, attachmentId, principal);
-		ClaimAttachment attachment = download.attachment();
+		AttachmentDownload attachmentDownload = attachmentService.downloadClaimAttachment(claimId, attachmentId, principal);
+		ClaimAttachment attachment = attachmentDownload.attachment();
 		return ResponseEntity.ok()
 				.contentType(parseContentType(attachment.getContentType()))
-				.contentLength(download.sizeBytes())
+				.contentLength(attachmentDownload.sizeBytes())
 				.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
 						.filename(attachment.getFileName(), StandardCharsets.UTF_8)
 						.build()
 						.toString())
-				.body(new InputStreamResource(download.inputStream()));
+				.body(new InputStreamResource(attachmentDownload.inputStream()));
 	}
 
 	@DeleteMapping("/{attachmentId}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	@PreAuthorize("hasAuthority('PERM_CLAIM_UPDATE')")
-	@Operation(summary = "Delete a claim attachment")
-	public void delete(
+	@Operation(summary = "Delete a claim attachment", operationId = "delete")
+	public void deleteClaimAttachment(
 			@PathVariable Long claimId,
 			@PathVariable UUID attachmentId,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
-		attachmentService.delete(claimId, attachmentId, principal);
+		attachmentService.deleteClaimAttachment(claimId, attachmentId, principal);
 	}
 
 	private static MediaType parseContentType(String contentType) {

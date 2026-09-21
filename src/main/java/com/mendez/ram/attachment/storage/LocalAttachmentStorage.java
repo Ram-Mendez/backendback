@@ -4,6 +4,7 @@ import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -25,28 +26,22 @@ public class LocalAttachmentStorage implements AttachmentStorage {
 	private static final Logger LOGGER = LoggerFactory.getLogger(LocalAttachmentStorage.class);
 	private static final int BUFFER_SIZE = 64 * 1024;
 
-	private final Path root;
+	private final Path storageRoot;
 
 	public LocalAttachmentStorage(AttachmentProperties properties) {
-		this.root = properties.getLocalStorageRoot().toAbsolutePath().normalize();
+		this.storageRoot = properties.getLocalStorageRoot().toAbsolutePath().normalize();
 	}
 
 	@Override
 	public StoredAttachment store(StoreAttachmentCommand command) {
-		Path target = resolve(command.storageKey());
+		Path targetPath = resolveStoragePath(command.storageKey());
 		try {
-			Files.createDirectories(target.getParent());
-			MessageDigest digest = sha256Digest();
-			long sizeBytes;
-			try (InputStream input = new BufferedInputStream(command.inputStream(), BUFFER_SIZE);
-					DigestInputStream digestInput = new DigestInputStream(input, digest);
-					OutputStream output = Files.newOutputStream(target, StandardOpenOption.CREATE_NEW,
-							StandardOpenOption.WRITE)) {
-				sizeBytes = digestInput.transferTo(output);
-			}
-			return new StoredAttachment(sizeBytes, HexFormat.of().formatHex(digest.digest()));
+			Files.createDirectories(targetPath.getParent());
+			MessageDigest sha256Digest = createSha256Digest();
+			long sizeBytes = writeAttachment(command, targetPath, sha256Digest);
+			return new StoredAttachment(sizeBytes, HexFormat.of().formatHex(sha256Digest.digest()));
 		}
-		catch (java.nio.file.FileAlreadyExistsException exception) {
+		catch (FileAlreadyExistsException exception) {
 			LOGGER.error("Attachment storage collision storageKey={}", command.storageKey(), exception);
 			throw new ApiException(HttpStatus.CONFLICT, "ATTACHMENT_STORAGE_CONFLICT",
 					"No se ha podido guardar el adjunto sin sobrescribir un archivo existente.");
@@ -58,15 +53,44 @@ public class LocalAttachmentStorage implements AttachmentStorage {
 		}
 	}
 
+	private long writeAttachment(StoreAttachmentCommand command, Path targetPath, MessageDigest sha256Digest)
+			throws IOException {
+		try (InputStream input = new BufferedInputStream(command.inputStream(), BUFFER_SIZE);
+				DigestInputStream digestInput = new DigestInputStream(input, sha256Digest);
+				OutputStream output = Files.newOutputStream(targetPath, StandardOpenOption.CREATE_NEW,
+						StandardOpenOption.WRITE)) {
+			return digestInput.transferTo(output);
+		}
+		catch (FileAlreadyExistsException exception) {
+			throw exception;
+		}
+		catch (IOException exception) {
+			deletePartiallyStoredAttachment(targetPath, command.storageKey());
+			throw exception;
+		}
+	}
+
+	private void deletePartiallyStoredAttachment(Path targetPath, String storageKey) {
+		try {
+			Files.deleteIfExists(targetPath);
+			deleteEmptyParentDirectories(targetPath.getParent());
+		}
+		catch (IOException cleanupException) {
+			LOGGER.warn("Partial attachment cleanup failed storageKey={}", storageKey, cleanupException);
+		}
+	}
+
 	@Override
 	public StoredAttachmentResource load(String storageKey) {
-		Path path = resolve(storageKey);
-		if (!Files.isRegularFile(path)) {
+		Path attachmentPath = resolveStoragePath(storageKey);
+		if (!Files.isRegularFile(attachmentPath)) {
 			throw new ApiException(HttpStatus.NOT_FOUND, "ATTACHMENT_NOT_FOUND",
 					"No existe el adjunto solicitado.");
 		}
 		try {
-			return new StoredAttachmentResource(Files.newInputStream(path, StandardOpenOption.READ), Files.size(path));
+			return new StoredAttachmentResource(
+					Files.newInputStream(attachmentPath, StandardOpenOption.READ),
+					Files.size(attachmentPath));
 		}
 		catch (IOException exception) {
 			LOGGER.error("Attachment storage read failed storageKey={}", storageKey, exception);
@@ -77,10 +101,10 @@ public class LocalAttachmentStorage implements AttachmentStorage {
 
 	@Override
 	public void delete(String storageKey) {
-		Path path = resolve(storageKey);
+		Path attachmentPath = resolveStoragePath(storageKey);
 		try {
-			Files.deleteIfExists(path);
-			deleteEmptyParents(path.getParent());
+			Files.deleteIfExists(attachmentPath);
+			deleteEmptyParentDirectories(attachmentPath.getParent());
 		}
 		catch (IOException exception) {
 			LOGGER.error("Attachment storage delete failed storageKey={}", storageKey, exception);
@@ -89,29 +113,31 @@ public class LocalAttachmentStorage implements AttachmentStorage {
 		}
 	}
 
-	private Path resolve(String storageKey) {
-		Path resolved = root.resolve(storageKey).normalize();
-		if (!resolved.startsWith(root)) {
+	private Path resolveStoragePath(String storageKey) {
+		Path resolvedPath = storageRoot.resolve(storageKey).normalize();
+		if (!resolvedPath.startsWith(storageRoot)) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ATTACHMENT_PATH",
 					"La ruta del adjunto no es valida.");
 		}
-		return resolved;
+		return resolvedPath;
 	}
 
-	private void deleteEmptyParents(Path start) throws IOException {
-		Path current = start;
-		while (current != null && current.startsWith(root) && !current.equals(root)) {
-			try (var entries = Files.list(current)) {
-				if (entries.findAny().isPresent()) {
+	private void deleteEmptyParentDirectories(Path startingDirectory) throws IOException {
+		Path currentDirectory = startingDirectory;
+		while (currentDirectory != null
+				&& currentDirectory.startsWith(storageRoot)
+				&& !currentDirectory.equals(storageRoot)) {
+			try (var directoryEntries = Files.list(currentDirectory)) {
+				if (directoryEntries.findAny().isPresent()) {
 					return;
 				}
 			}
-			Files.deleteIfExists(current);
-			current = current.getParent();
+			Files.deleteIfExists(currentDirectory);
+			currentDirectory = currentDirectory.getParent();
 		}
 	}
 
-	private static MessageDigest sha256Digest() {
+	private static MessageDigest createSha256Digest() {
 		try {
 			return MessageDigest.getInstance("SHA-256");
 		}

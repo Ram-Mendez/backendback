@@ -50,7 +50,7 @@ describe('ClaimAttachmentsComponent', () => {
       textFile('two.csv', 'two', 'text/csv')
     ]);
 
-    expect(component.queuedFiles().length).toBe(2);
+    expect(component.queuedAttachmentFiles().length).toBe(2);
     expect(pageText()).toContain('one.txt');
     expect(pageText()).toContain('two.csv');
     expect(pageText()).toContain('text/csv');
@@ -64,7 +64,7 @@ describe('ClaimAttachmentsComponent', () => {
 
     dispatchFiles('input[webkitdirectory]', [rootFile, nestedFile]);
 
-    expect(component.queuedFiles().map((file) => file.relativePath)).toEqual([
+    expect(component.queuedAttachmentFiles().map((file) => file.relativePath)).toEqual([
       'folder/a.txt',
       'folder/sub/deep/b.pdf'
     ]);
@@ -78,16 +78,16 @@ describe('ClaimAttachmentsComponent', () => {
     buttonWithText('Quitar')?.click();
     fixture.detectChanges();
 
-    expect(component.queuedFiles()).toEqual([]);
+    expect(component.queuedAttachmentFiles()).toEqual([]);
     expect(pageText()).not.toContain('remove-me.txt');
   });
 
   it('shows a clear message when a real file size limit is exceeded', () => {
-    component.capabilities.set({ ...defaultCapabilities(), maxFileSizeBytes: 3 });
+    component.attachmentCapabilities.set({ ...defaultCapabilities(), maxFileSizeBytes: 3 });
 
     dispatchFiles('input[type="file"]:not([webkitdirectory])', [textFile('too-large.bin', 'abcd')]);
 
-    expect(component.canStartUpload()).toBeFalse();
+    expect(component.canStartAttachmentUpload()).toBeFalse();
     expect(pageText()).toContain('"too-large.bin" supera el limite por archivo');
   });
 
@@ -101,7 +101,7 @@ describe('ClaimAttachmentsComponent', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    expect(component.queuedFiles()[0].relativePath).toBe('dropped.txt');
+    expect(component.queuedAttachmentFiles()[0].relativePath).toBe('dropped.txt');
     expect(pageText()).toContain('dropped.txt');
   });
 
@@ -120,7 +120,7 @@ describe('ClaimAttachmentsComponent', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    expect(component.queuedFiles().map((file) => file.relativePath)).toEqual([
+    expect(component.queuedAttachmentFiles().map((file) => file.relativePath)).toEqual([
       'folder/a.txt',
       'folder/sub/b.pdf'
     ]);
@@ -142,7 +142,7 @@ describe('ClaimAttachmentsComponent', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    expect(component.queuedFiles()[0].relativePath).toBe('root/one/two/deep.json');
+    expect(component.queuedAttachmentFiles()[0].relativePath).toBe('root/one/two/deep.json');
   });
 
   it('supports a dropped mix of regular files and directories', async () => {
@@ -159,7 +159,7 @@ describe('ClaimAttachmentsComponent', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    expect(component.queuedFiles().map((file) => file.relativePath)).toEqual([
+    expect(component.queuedAttachmentFiles().map((file) => file.relativePath)).toEqual([
       'loose.csv',
       'folder/inside.txt'
     ]);
@@ -177,7 +177,7 @@ describe('ClaimAttachmentsComponent', () => {
     expect(uploadRequest.request.method).toBe('POST');
     const formData = uploadRequest.request.body as FormData;
     expect(formData.getAll('relativePaths')).toEqual(['one.txt', 'two.txt']);
-    expect(component.queuedFiles().every((file) => file.status === 'uploading')).toBeTrue();
+    expect(component.queuedAttachmentFiles().every((file) => file.status === 'uploading')).toBeTrue();
 
     uploadRequest.flush([attachmentResponse({ id: 'uploaded-id', fileName: 'one.txt', relativePath: 'one.txt' })], {
       status: 201,
@@ -187,7 +187,7 @@ describe('ClaimAttachmentsComponent', () => {
     expectListRequest().flush([attachmentResponse({ id: 'uploaded-id', fileName: 'one.txt', relativePath: 'one.txt' })]);
     fixture.detectChanges();
 
-    expect(component.queuedFiles().every((file) => file.status === 'success')).toBeTrue();
+    expect(component.queuedAttachmentFiles().every((file) => file.status === 'success')).toBeTrue();
     expect(pageText()).toContain('Completado');
     expect(pageText()).toContain('one.txt');
   });
@@ -223,11 +223,11 @@ describe('ClaimAttachmentsComponent', () => {
     expectListRequest().flush([]);
     fixture.detectChanges();
 
-    expect(component.queuedFiles().every((file) => file.status === 'success')).toBeTrue();
+    expect(component.queuedAttachmentFiles().every((file) => file.status === 'success')).toBeTrue();
   });
 
   it('marks a failed batch and retries without duplicating completed files', async () => {
-    component.capabilities.set({ ...defaultCapabilities(), maxFilesPerRequest: 2 });
+    component.attachmentCapabilities.set({ ...defaultCapabilities(), maxFilesPerRequest: 2 });
     dispatchFiles('input[type="file"]:not([webkitdirectory])', [
       textFile('one.txt', 'one'),
       textFile('two.txt', 'two'),
@@ -252,7 +252,7 @@ describe('ClaimAttachmentsComponent', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    expect(component.queuedFiles().map((file) => file.status)).toEqual(['success', 'success', 'error']);
+    expect(component.queuedAttachmentFiles().map((file) => file.status)).toEqual(['success', 'success', 'error']);
     expect(pageText()).toContain('Lote 2/2');
 
     buttonWithText('Subir adjuntos')?.click();
@@ -264,11 +264,11 @@ describe('ClaimAttachmentsComponent', () => {
     await fixture.whenStable();
     expectListRequest().flush([]);
 
-    expect(component.queuedFiles().map((file) => file.status)).toEqual(['success', 'success', 'success']);
+    expect(component.queuedAttachmentFiles().map((file) => file.status)).toEqual(['success', 'success', 'success']);
   });
 
   it('lists existing attachments', () => {
-    component.loadAttachments();
+    component.loadClaimAttachments();
     expectListRequest().flush([attachmentResponse()]);
     fixture.detectChanges();
 
@@ -281,7 +281,7 @@ describe('ClaimAttachmentsComponent', () => {
     const clickSpy = spyOn(HTMLAnchorElement.prototype, 'click');
     const createSpy = spyOn(URL, 'createObjectURL').and.returnValue('blob:download');
     const revokeSpy = spyOn(URL, 'revokeObjectURL');
-    component.attachments.set([attachmentResponse()]);
+    component.claimAttachments.set([attachmentResponse()]);
     fixture.detectChanges();
 
     buttonWithText('Descargar')?.click();
@@ -299,7 +299,7 @@ describe('ClaimAttachmentsComponent', () => {
 
   it('deletes an attachment and refreshes the list', () => {
     spyOn(window, 'confirm').and.returnValue(true);
-    component.attachments.set([attachmentResponse()]);
+    component.claimAttachments.set([attachmentResponse()]);
     fixture.detectChanges();
 
     buttonWithText('Eliminar')?.click();
@@ -326,12 +326,12 @@ describe('ClaimAttachmentsComponent', () => {
     expect(pageText()).toContain('Lote 1/1');
     expect(pageText()).toContain('El tipo de archivo no esta permitido.');
     expect(pageText()).toContain('La extension del adjunto no esta permitida.');
-    expect(component.queuedFiles()[0].status).toBe('error');
+    expect(component.queuedAttachmentFiles()[0].status).toBe('error');
   });
 
   it('does not offer upload or delete actions when the claim is not editable', () => {
     component.editable = false;
-    component.attachments.set([attachmentResponse()]);
+    component.claimAttachments.set([attachmentResponse()]);
     fixture.detectChanges();
 
     expect(queryElement('.dropzone')).toBeNull();
@@ -357,14 +357,14 @@ describe('ClaimAttachmentsComponent', () => {
 
   function relativePathsFrom(request: TestRequest): string[] {
     const formData = request.request.body as FormData;
-    return formData.getAll('relativePaths').map((value) => value.toString());
+    return formData.getAll('relativePaths').map((relativePathValue) => relativePathValue.toString());
   }
 
-  function dropEventWithItems(items: DataTransferItem[]): DragEvent {
+  function dropEventWithItems(dataTransferItems: DataTransferItem[]): DragEvent {
     const event = new DragEvent('drop', { bubbles: true });
     Object.defineProperty(event, 'dataTransfer', {
       value: {
-        items,
+        items: dataTransferItems,
         files: new DataTransfer().files
       }
     });

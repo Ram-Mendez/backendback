@@ -2,20 +2,24 @@ package com.mendez.ram.claim.controller;
 
 import java.net.URI;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import com.mendez.ram.claim.dto.AssignClaimRequest;
 import com.mendez.ram.claim.dto.ChangeClaimStatusRequest;
+import com.mendez.ram.claim.dto.ClaimCommentResponse;
+import com.mendez.ram.claim.dto.ClaimHistoryResponse;
 import com.mendez.ram.claim.dto.ClaimResponse;
 import com.mendez.ram.claim.dto.ClaimSearchCriteria;
 import com.mendez.ram.claim.dto.ClaimSummaryResponse;
+import com.mendez.ram.claim.dto.CreateClaimCommentRequest;
 import com.mendez.ram.claim.dto.CreateClaimRequest;
 import com.mendez.ram.claim.dto.PageResponse;
+import com.mendez.ram.claim.dto.ReviewerResponse;
 import com.mendez.ram.claim.dto.UpdateClaimRequest;
-import com.mendez.ram.claim.entity.ClaimStatus;
 import com.mendez.ram.claim.entity.ClaimPriority;
-import com.mendez.ram.claim.dto.*;
-import java.util.List;
+import com.mendez.ram.claim.entity.ClaimStatus;
 import com.mendez.ram.claim.service.ClaimService;
 import com.mendez.ram.config.OpenApiConfig;
 import com.mendez.ram.exception.ApiException;
@@ -70,8 +74,8 @@ public class ClaimController {
 
 	@GetMapping
 	@PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
-	@Operation(summary = "Search claims with optional filters")
-	public PageResponse<ClaimSummaryResponse> findAll(
+	@Operation(summary = "Search claims with optional filters", operationId = "findAll")
+	public PageResponse<ClaimSummaryResponse> searchClaims(
 			@RequestParam(required = false) String search,
 			@RequestParam(required = false) ClaimStatus status,
 			@RequestParam(required = false) String reference,
@@ -85,45 +89,85 @@ public class ClaimController {
 			@RequestParam(defaultValue = "" + DEFAULT_SIZE) int size,
 			@RequestParam(defaultValue = "createdAt,desc") String sort,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
-		validateDateRange(createdFrom, createdTo);
+		ensureClaimDateRangeIsValid(createdFrom, createdTo);
 		ClaimSearchCriteria criteria = new ClaimSearchCriteria(
-				search, status, reference, createdBy, assignedTo, priority, overdue, createdFrom, createdTo);
-		return claimService.findAll(criteria, pageable(page, size, sort), principal);
+				search,
+				status,
+				reference,
+				createdBy,
+				assignedTo,
+				priority,
+				overdue,
+				createdFrom,
+				createdTo);
+		Pageable pageable = buildClaimPageable(page, size, sort);
+
+		return claimService.searchClaims(criteria, pageable, principal);
 	}
 
 	@PatchMapping("/{id}/assignment")
 	@PreAuthorize("hasAnyAuthority('PERM_CLAIM_REVIEW','PERM_CLAIM_ADMIN')")
-	public ClaimResponse assign(@PathVariable Long id, @Valid @RequestBody AssignClaimRequest request, @AuthenticationPrincipal AuthenticatedUser principal) {
-		return claimService.assign(id, request, principal);
+	@Operation(operationId = "assign")
+	public ClaimResponse assignClaim(
+			@PathVariable Long id,
+			@Valid @RequestBody AssignClaimRequest request,
+			@AuthenticationPrincipal AuthenticatedUser principal) {
+		return claimService.assignClaim(id, request, principal);
 	}
 
-	@GetMapping("/{id}/history") @PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
-	public List<ClaimHistoryResponse> history(@PathVariable Long id, @AuthenticationPrincipal AuthenticatedUser principal) { return claimService.history(id, principal); }
-
-	@GetMapping("/{id}/comments") @PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
-	public List<ClaimCommentResponse> comments(@PathVariable Long id, @AuthenticationPrincipal AuthenticatedUser principal) { return claimService.comments(id, principal); }
-
-	@PostMapping("/{id}/comments") @PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
-	public ResponseEntity<ClaimCommentResponse> comment(@PathVariable Long id, @Valid @RequestBody CreateClaimCommentRequest request, @AuthenticationPrincipal AuthenticatedUser principal) {
-		return ResponseEntity.status(HttpStatus.CREATED).body(claimService.comment(id, request, principal));
+	@GetMapping("/{id}/history")
+	@PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
+	@Operation(operationId = "history")
+	public List<ClaimHistoryResponse> loadClaimHistory(
+			@PathVariable Long id,
+			@AuthenticationPrincipal AuthenticatedUser principal) {
+		return claimService.loadClaimHistory(id, principal);
 	}
 
-	@GetMapping("/reviewers") @PreAuthorize("hasAnyAuthority('PERM_CLAIM_REVIEW','PERM_CLAIM_ADMIN')")
-	public List<ReviewerResponse> reviewers(@AuthenticationPrincipal AuthenticatedUser principal) { return claimService.reviewers(principal); }
+	@GetMapping("/{id}/comments")
+	@PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
+	@Operation(operationId = "comments")
+	public List<ClaimCommentResponse> loadClaimComments(
+			@PathVariable Long id,
+			@AuthenticationPrincipal AuthenticatedUser principal) {
+		return claimService.loadClaimComments(id, principal);
+	}
+
+	@PostMapping("/{id}/comments")
+	@PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
+	@Operation(operationId = "comment")
+	public ResponseEntity<ClaimCommentResponse> addClaimComment(
+			@PathVariable Long id,
+			@Valid @RequestBody CreateClaimCommentRequest request,
+			@AuthenticationPrincipal AuthenticatedUser principal) {
+		ClaimCommentResponse response = claimService.addClaimComment(id, request, principal);
+
+		return ResponseEntity
+				.status(HttpStatus.CREATED)
+				.body(response);
+	}
+
+	@GetMapping("/reviewers")
+	@PreAuthorize("hasAnyAuthority('PERM_CLAIM_REVIEW','PERM_CLAIM_ADMIN')")
+	@Operation(operationId = "reviewers")
+	public List<ReviewerResponse> loadEligibleReviewers(
+			@AuthenticationPrincipal AuthenticatedUser principal) {
+		return claimService.loadEligibleReviewers(principal);
+	}
 
 	@GetMapping("/{id}")
 	@PreAuthorize("hasAuthority('PERM_CLAIM_READ')")
-	@Operation(summary = "Get a claim by id")
-	public ClaimResponse findById(@PathVariable Long id, @AuthenticationPrincipal AuthenticatedUser principal) {
-		return claimService.findById(id, principal);
+	@Operation(summary = "Get a claim by id", operationId = "findById")
+	public ClaimResponse findClaimById(@PathVariable Long id, @AuthenticationPrincipal AuthenticatedUser principal) {
+		return claimService.findClaimById(id, principal);
 	}
 
 	@PostMapping
 	@PreAuthorize("hasAuthority('PERM_CLAIM_CREATE')")
-	@Operation(summary = "Create a claim")
-	public ResponseEntity<ClaimResponse> create(@Valid @RequestBody CreateClaimRequest request,
+	@Operation(summary = "Create a claim", operationId = "create")
+	public ResponseEntity<ClaimResponse> createClaim(@Valid @RequestBody CreateClaimRequest request,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
-		ClaimResponse response = claimService.create(request, principal);
+		ClaimResponse response = claimService.createClaim(request, principal);
 		URI location = ServletUriComponentsBuilder.fromCurrentRequest()
 				.path("/{id}")
 				.buildAndExpand(response.id())
@@ -133,52 +177,69 @@ public class ClaimController {
 
 	@PutMapping("/{id}")
 	@PreAuthorize("hasAuthority('PERM_CLAIM_UPDATE')")
-	@Operation(summary = "Update editable claim fields")
-	public ClaimResponse update(@PathVariable Long id, @Valid @RequestBody UpdateClaimRequest request,
+	@Operation(summary = "Update editable claim fields", operationId = "update")
+	public ClaimResponse updateClaim(@PathVariable Long id, @Valid @RequestBody UpdateClaimRequest request,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
-		return claimService.update(id, request, principal);
+		return claimService.updateClaim(id, request, principal);
 	}
 
 	@PatchMapping("/{id}/status")
 	@PreAuthorize("hasAnyAuthority('PERM_CLAIM_UPDATE', 'PERM_CLAIM_REVIEW', 'PERM_CLAIM_ADMIN')")
-	@Operation(summary = "Change claim status using the configured lifecycle")
-	public ClaimResponse changeStatus(@PathVariable Long id, @Valid @RequestBody ChangeClaimStatusRequest request,
+	@Operation(summary = "Change claim status using the configured lifecycle", operationId = "changeStatus")
+	public ClaimResponse updateClaimStatus(@PathVariable Long id, @Valid @RequestBody ChangeClaimStatusRequest request,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
-		return claimService.changeStatus(id, request, principal);
+		return claimService.updateClaimStatus(id, request, principal);
 	}
 
-	private static void validateDateRange(LocalDate createdFrom, LocalDate createdTo) {
+	private static void ensureClaimDateRangeIsValid(LocalDate createdFrom, LocalDate createdTo) {
 		if (createdFrom != null && createdTo != null && createdFrom.isAfter(createdTo)) {
-			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_DATE_RANGE",
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"INVALID_DATE_RANGE",
 					"createdFrom debe ser anterior o igual a createdTo.");
 		}
 	}
 
-	private Pageable pageable(int page, int size, String sort) {
+	private Pageable buildClaimPageable(int page, int size, String sort) {
 		if (page < 0) {
-			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PAGE_REQUEST", "page debe ser mayor o igual que 0.");
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"INVALID_PAGE_REQUEST",
+					"page debe ser mayor o igual que 0.");
 		}
+
 		if (size < 1) {
-			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PAGE_REQUEST", "size debe ser mayor que 0.");
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"INVALID_PAGE_REQUEST",
+					"size debe ser mayor que 0.");
 		}
+
 		int resolvedSize = Math.min(size, MAX_SIZE);
-		String[] parts = sort.split(",", 2);
-		String requestedField = parts[0].trim();
-		String property = SORT_FIELDS.get(requestedField);
-		if (property == null) {
-			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_SORT_FIELD",
+		String[] sortParts = sort.split(",", 2);
+		String requestedField = sortParts[0].trim();
+		String sortProperty = SORT_FIELDS.get(requestedField);
+
+		if (sortProperty == null) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"INVALID_SORT_FIELD",
 					"Campo de ordenacion no permitido: " + requestedField + ".");
 		}
+
 		Sort.Direction direction = Sort.Direction.DESC;
-		if (parts.length == 2 && !parts[1].isBlank()) {
+		if (sortParts.length == 2 && !sortParts[1].isBlank()) {
 			try {
-				direction = Sort.Direction.fromString(parts[1].trim().toUpperCase(Locale.ROOT));
+				direction = Sort.Direction.fromString(sortParts[1].trim().toUpperCase(Locale.ROOT));
 			}
 			catch (IllegalArgumentException exception) {
-				throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_SORT_DIRECTION",
-						"Direccion de ordenacion no permitida: " + parts[1] + ".");
+				throw new ApiException(
+						HttpStatus.BAD_REQUEST,
+						"INVALID_SORT_DIRECTION",
+						"Direccion de ordenacion no permitida: " + sortParts[1] + ".");
 			}
 		}
-		return PageRequest.of(page, resolvedSize, Sort.by(direction, property));
+
+		return PageRequest.of(page, resolvedSize, Sort.by(direction, sortProperty));
 	}
 }

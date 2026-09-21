@@ -33,7 +33,7 @@ describe('ClaimsService', () => {
   it('sends only real list filters as query parameters', () => {
     const response = pageResponse();
 
-    service.list({
+    service.loadClaimList({
       search: 'incidencia',
       reference: 'CLM-2026-000001',
       createdBy: 'dev-admin',
@@ -43,9 +43,9 @@ describe('ClaimsService', () => {
       page: 2,
       size: 20,
       sort: 'updatedAt,asc'
-    }).subscribe((page) => {
-      expect(page).toEqual(response);
-      expect(page.page).toBe(2);
+    }).subscribe((claimPage) => {
+      expect(claimPage).toEqual(response);
+      expect(claimPage.page).toBe(2);
     });
 
     const request = httpMock.expectOne((candidate) => candidate.url === '/api/v1/claims');
@@ -66,7 +66,7 @@ describe('ClaimsService', () => {
   });
 
   it('omits empty optional filters', () => {
-    service.list({
+    service.loadClaimList({
       search: '',
       reference: null,
       createdBy: undefined,
@@ -84,9 +84,9 @@ describe('ClaimsService', () => {
   it('gets claim detail by id', () => {
     const response = detailResponse();
 
-    service.get(12).subscribe((claim) => {
-      expect(claim).toEqual(response);
-      expect(claim.claimantName).toBe('Alba Serrano');
+    service.loadClaimDetail(12).subscribe((claimDetail) => {
+      expect(claimDetail).toEqual(response);
+      expect(claimDetail.claimantName).toBe('Alba Serrano');
     });
 
     const request = httpMock.expectOne('/api/v1/claims/12');
@@ -95,45 +95,45 @@ describe('ClaimsService', () => {
   });
 
   it('creates claims with the real request DTO', () => {
-    const body: CreateClaimRequest = {
+    const createClaimRequest: CreateClaimRequest = {
       title: 'Revisión de contrato',
       description: 'Descripción de la reclamación',
       claimantName: 'Cliente Test'
     };
 
-    service.create(body).subscribe((claim) => {
-      expect(claim.reference).toBe('CLM-2026-000001');
+    service.createClaim(createClaimRequest).subscribe((claimDetail) => {
+      expect(claimDetail.reference).toBe('CLM-2026-000001');
     });
 
     const request = httpMock.expectOne('/api/v1/claims');
     expect(request.request.method).toBe('POST');
-    expect(request.request.body).toEqual(body);
+    expect(request.request.body).toEqual(createClaimRequest);
     expect('status' in request.request.body).toBe(false);
     request.flush(detailResponse());
   });
 
   it('updates claims with the real request DTO', () => {
-    const body: UpdateClaimRequest = {
+    const updateClaimRequest: UpdateClaimRequest = {
       title: 'Título actualizado',
       description: 'Descripción actualizada',
       claimantName: 'Cliente Actualizado',
       version: 4
     };
 
-    service.update(12, body).subscribe((claim) => {
-      expect(claim.title).toBe('Título actualizado');
+    service.updateClaim(12, updateClaimRequest).subscribe((claimDetail) => {
+      expect(claimDetail.title).toBe('Título actualizado');
     });
 
     const request = httpMock.expectOne('/api/v1/claims/12');
     expect(request.request.method).toBe('PUT');
-    expect(request.request.body).toEqual(body);
+    expect(request.request.body).toEqual(updateClaimRequest);
     expect('status' in request.request.body).toBe(false);
     request.flush({ ...detailResponse(), title: 'Título actualizado', description: 'Descripción actualizada', version: 5 });
   });
 
   it('updates status through the dedicated PATCH endpoint', () => {
-    service.updateStatus(12, 'ACCEPTED', 4).subscribe((claim) => {
-      expect(claim.status).toBe('ACCEPTED');
+    service.updateClaimStatus(12, 'ACCEPTED', 4).subscribe((claimDetail) => {
+      expect(claimDetail.status).toBe('ACCEPTED');
     });
 
     const request = httpMock.expectOne('/api/v1/claims/12/status');

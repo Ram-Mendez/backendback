@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import com.mendez.ram.claim.dto.ChangeClaimStatusRequest;
+import com.mendez.ram.claim.dto.AssignClaimRequest;
 import com.mendez.ram.claim.dto.CreateClaimRequest;
 import com.mendez.ram.claim.dto.UpdateClaimRequest;
 import com.mendez.ram.claim.entity.Claim;
@@ -67,16 +68,16 @@ class ClaimServiceTest {
 		when(authUserRepository.findById(1L)).thenReturn(Optional.of(actor));
 		when(claimRepository.saveAndFlush(any(Claim.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-		var response = claimService.create(new CreateClaimRequest(
+		var createdClaim = claimService.createClaim(new CreateClaimRequest(
 				"  Missing invoice  ",
 				"  Detailed claim description.  ",
 				"  Cliente Test  "), principal);
 
-		assertThat(response.title()).isEqualTo("Missing invoice");
-		assertThat(response.description()).isEqualTo("Detailed claim description.");
-		assertThat(response.claimantName()).isEqualTo("Cliente Test");
-		assertThat(response.status()).isEqualTo(ClaimStatus.DRAFT);
-		assertThat(response.createdByUsername()).isEqualTo("dev-user");
+		assertThat(createdClaim.title()).isEqualTo("Missing invoice");
+		assertThat(createdClaim.description()).isEqualTo("Detailed claim description.");
+		assertThat(createdClaim.claimantName()).isEqualTo("Cliente Test");
+		assertThat(createdClaim.status()).isEqualTo(ClaimStatus.DRAFT);
+		assertThat(createdClaim.createdByUsername()).isEqualTo("dev-user");
 		verify(entityManager).refresh(any(Claim.class));
 	}
 
@@ -89,10 +90,10 @@ class ClaimServiceTest {
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
 		when(authUserRepository.findById(1L)).thenReturn(Optional.of(actor));
 
-		var response = claimService.changeStatus(10L,
+		var updatedClaim = claimService.updateClaimStatus(10L,
 				new ChangeClaimStatusRequest(ClaimStatus.REGISTERED, 0L), principal);
 
-		assertThat(response.status()).isEqualTo(ClaimStatus.REGISTERED);
+		assertThat(updatedClaim.status()).isEqualTo(ClaimStatus.REGISTERED);
 		verify(claimRepository).flush();
 		verify(entityManager).refresh(claim);
 	}
@@ -105,7 +106,7 @@ class ClaimServiceTest {
 		Claim claim = new Claim("Draft", "Description", null, actor, NOW);
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
 
-		assertThatThrownBy(() -> claimService.changeStatus(10L,
+		assertThatThrownBy(() -> claimService.updateClaimStatus(10L,
 				new ChangeClaimStatusRequest(ClaimStatus.ACCEPTED, 0L), principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.CONFLICT));
@@ -116,7 +117,7 @@ class ClaimServiceTest {
 		AuthenticatedUser principal = principal(1L, Set.of("ROLE_ADMIN"), Set.of("PERM_CLAIM_READ"));
 		when(claimRepository.findWithUsersById(999L)).thenReturn(Optional.empty());
 
-		assertThatThrownBy(() -> claimService.findById(999L, principal))
+		assertThatThrownBy(() -> claimService.findClaimById(999L, principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
 	}
@@ -128,7 +129,7 @@ class ClaimServiceTest {
 		Claim claim = new Claim("Draft", "Description", null, authUser(2L, "other-user"), NOW);
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
 
-		assertThatThrownBy(() -> claimService.update(10L,
+		assertThatThrownBy(() -> claimService.updateClaim(10L,
 				new UpdateClaimRequest("New title", "New description", null, 0L), principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
@@ -145,10 +146,28 @@ class ClaimServiceTest {
 		claim.changeStatus(ClaimStatus.ACCEPTED, actor, NOW);
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
 
-		assertThatThrownBy(() -> claimService.update(10L,
+		assertThatThrownBy(() -> claimService.updateClaim(10L,
 				new UpdateClaimRequest("New title", "New description", null, 0L), principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.CONFLICT));
+	}
+
+	@Test
+	void disabledReviewerCannotBeAssigned() {
+		AuthenticatedUser principal = principal(1L, Set.of("ROLE_MANAGER"), Set.of("PERM_CLAIM_REVIEW"));
+		AuthUser actor = authUser(1L, "manager");
+		AuthUser disabledReviewer = authUser(2L, "disabled-manager");
+		when(disabledReviewer.isEnabled()).thenReturn(false);
+		Claim claim = new Claim("Draft", "Description", null, actor, NOW);
+		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
+		when(authUserRepository.findById(1L)).thenReturn(Optional.of(actor));
+		when(authUserRepository.findById(2L)).thenReturn(Optional.of(disabledReviewer));
+
+		assertThatThrownBy(() -> claimService.assignClaim(10L, new AssignClaimRequest(2L, 0L), principal))
+				.isInstanceOfSatisfying(ApiException.class, exception -> {
+					assertThat(exception.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+					assertThat(exception.getCode()).isEqualTo("INVALID_ASSIGNEE");
+				});
 	}
 
 	private static AuthenticatedUser principal(Long id, Set<String> roles, Set<String> permissions) {
@@ -160,9 +179,9 @@ class ClaimServiceTest {
 	}
 
 	private static AuthUser authUser(Long id, String username) {
-		AuthUser user = mock(AuthUser.class);
-		lenient().when(user.getId()).thenReturn(id);
-		lenient().when(user.getUsername()).thenReturn(username);
-		return user;
+		AuthUser authenticatedUser = mock(AuthUser.class);
+		lenient().when(authenticatedUser.getId()).thenReturn(id);
+		lenient().when(authenticatedUser.getUsername()).thenReturn(username);
+		return authenticatedUser;
 	}
 }

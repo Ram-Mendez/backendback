@@ -1,12 +1,15 @@
 package com.mendez.ram.claim.repository;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.Locale;
 
 import com.mendez.ram.claim.dto.ClaimSearchCriteria;
 import com.mendez.ram.claim.entity.Claim;
+import com.mendez.ram.claim.entity.ClaimPriority;
+import com.mendez.ram.claim.entity.ClaimStatus;
 import jakarta.persistence.criteria.JoinType;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.util.StringUtils;
@@ -16,33 +19,106 @@ public final class ClaimSpecifications {
 	private ClaimSpecifications() {
 	}
 
-	public static Specification<Claim> matching(ClaimSearchCriteria criteria) {
+	public static Specification<Claim> matchingClaimSearchCriteria(ClaimSearchCriteria criteria) {
 		return Specification
-				.where(search(criteria.search()))
-				.and((root, query, builder) -> criteria.status() == null
-						? builder.conjunction()
-						: builder.equal(root.get("status"), criteria.status()))
-				.and(containsIgnoreCase("reference", criteria.reference()))
-				.and(createdBy(criteria.createdBy()))
-				.and(userMatches("createdBy", criteria.assignedTo()))
-				.and((root, query, builder) -> criteria.priority() == null ? builder.conjunction() : builder.equal(root.get("priority"), criteria.priority()))
-				.and((root, query, builder) -> criteria.overdue() == null ? builder.conjunction() : criteria.overdue()
-						? builder.and(builder.isNotNull(root.get("dueAt")), builder.lessThan(root.get("dueAt"), Instant.now()))
-						: builder.or(builder.isNull(root.get("dueAt")), builder.greaterThanOrEqualTo(root.get("dueAt"), Instant.now())))
-				.and((root, query, builder) -> criteria.createdFrom() == null
-						? builder.conjunction()
-						: builder.greaterThanOrEqualTo(root.get("createdAt"), startOfDay(criteria.createdFrom())))
-				.and((root, query, builder) -> criteria.createdTo() == null
-						? builder.conjunction()
-						: builder.lessThan(root.get("createdAt"), startOfDay(criteria.createdTo().plusDays(1))));
+				.where(searchTermMatches(criteria.search()))
+				.and(statusMatches(criteria.status()))
+				.and(fieldContainsIgnoreCase("reference", criteria.reference()))
+				.and(createdByUserMatches(criteria.createdBy()))
+				.and(userAssociationMatches("assignedTo", criteria.assignedTo()))
+				.and(priorityMatches(criteria.priority()))
+				.and(overdueClaims(criteria.overdue()))
+				.and(createdOnOrAfter(criteria.createdFrom()))
+				.and(createdOnOrBefore(criteria.createdTo()));
 	}
 
-	private static Specification<Claim> userMatches(String field, String value) {
+	private static Specification<Claim> statusMatches(ClaimStatus status) {
 		return (root, query, builder) -> {
-			if (!StringUtils.hasText(value)) return builder.conjunction();
-			String trimmed=value.trim(); var user=root.join(field, JoinType.LEFT); String pattern=contains(trimmed);
-			var text=builder.or(builder.like(builder.lower(user.get("username")), pattern), builder.like(builder.lower(user.get("email")), pattern));
-			return trimmed.matches("\\d+") ? builder.or(text, builder.equal(user.get("id"), Long.valueOf(trimmed))) : text;
+			if (status == null) {
+				return builder.conjunction();
+			}
+
+			return builder.equal(root.get("status"), status);
+		};
+	}
+
+	private static Specification<Claim> priorityMatches(ClaimPriority priority) {
+		return (root, query, builder) -> {
+			if (priority == null) {
+				return builder.conjunction();
+			}
+
+			return builder.equal(root.get("priority"), priority);
+		};
+	}
+
+	private static Specification<Claim> overdueClaims(Boolean overdue) {
+		return (root, query, builder) -> {
+			if (overdue == null) {
+				return builder.conjunction();
+			}
+
+			if (overdue) {
+				return builder.and(
+						builder.isNotNull(root.get("dueAt")),
+						builder.lessThan(root.get("dueAt"), Instant.now()),
+						builder.not(
+								root.<ClaimStatus>get("status").in(
+										ClaimStatus.ACCEPTED,
+										ClaimStatus.REJECTED,
+										ClaimStatus.INADMISSIBLE)));
+			}
+
+			return builder.or(
+					builder.isNull(root.get("dueAt")),
+					builder.greaterThanOrEqualTo(root.get("dueAt"), Instant.now()));
+		};
+	}
+
+	private static Specification<Claim> createdOnOrAfter(LocalDate createdFrom) {
+		return (root, query, builder) -> {
+			if (createdFrom == null) {
+				return builder.conjunction();
+			}
+
+			return builder.greaterThanOrEqualTo(
+					root.get("createdAt"),
+					utcStartOfDay(createdFrom));
+		};
+	}
+
+	private static Specification<Claim> createdOnOrBefore(LocalDate createdTo) {
+		return (root, query, builder) -> {
+			if (createdTo == null) {
+				return builder.conjunction();
+			}
+
+			return builder.lessThan(
+					root.get("createdAt"),
+					utcStartOfDay(createdTo.plusDays(1)));
+		};
+	}
+
+	private static Specification<Claim> userAssociationMatches(String userAssociationPath, String searchText) {
+		return (root, query, builder) -> {
+			if (!StringUtils.hasText(searchText)) {
+				return builder.conjunction();
+			}
+
+			String trimmedSearchText = searchText.trim();
+			String containsPattern = containsPattern(trimmedSearchText);
+			var associatedUser = root.join(userAssociationPath, JoinType.LEFT);
+			var usernameOrEmailMatches = builder.or(
+					builder.like(builder.lower(associatedUser.get("username")), containsPattern),
+					builder.like(builder.lower(associatedUser.get("email")), containsPattern));
+
+			if (trimmedSearchText.matches("\\d+")) {
+				return builder.or(
+						usernameOrEmailMatches,
+						builder.equal(associatedUser.get("id"), Long.valueOf(trimmedSearchText)));
+			}
+
+			return usernameOrEmailMatches;
 		};
 	}
 
@@ -50,55 +126,62 @@ public final class ClaimSpecifications {
 		return (root, query, builder) -> builder.equal(root.get("createdBy").get("id"), userId);
 	}
 
-	private static Specification<Claim> containsIgnoreCase(String fieldName, String value) {
+	private static Specification<Claim> fieldContainsIgnoreCase(String fieldName, String searchText) {
 		return (root, query, builder) -> {
-			if (!StringUtils.hasText(value)) {
+			if (!StringUtils.hasText(searchText)) {
 				return builder.conjunction();
 			}
-			return builder.like(builder.lower(root.get(fieldName)), contains(value));
+
+			return builder.like(builder.lower(root.get(fieldName)), containsPattern(searchText));
 		};
 	}
 
-	private static Specification<Claim> search(String value) {
+	private static Specification<Claim> searchTermMatches(String searchTerm) {
 		return (root, query, builder) -> {
-			if (!StringUtils.hasText(value)) {
+			if (!StringUtils.hasText(searchTerm)) {
 				return builder.conjunction();
 			}
-			String pattern = contains(value);
-			var createdBy = root.join("createdBy", JoinType.LEFT);
+
+			String containsPattern = containsPattern(searchTerm);
+			var createdByUser = root.join("createdBy", JoinType.LEFT);
 			return builder.or(
-					builder.like(builder.lower(root.get("reference")), pattern),
-					builder.like(builder.lower(root.get("title")), pattern),
-					builder.like(builder.lower(root.get("description")), pattern),
-					builder.like(builder.lower(root.get("claimantName")), pattern),
-					builder.like(builder.lower(createdBy.get("username")), pattern),
-					builder.like(builder.lower(createdBy.get("email")), pattern));
+					builder.like(builder.lower(root.get("reference")), containsPattern),
+					builder.like(builder.lower(root.get("title")), containsPattern),
+					builder.like(builder.lower(root.get("description")), containsPattern),
+					builder.like(builder.lower(root.get("claimantName")), containsPattern),
+					builder.like(builder.lower(createdByUser.get("username")), containsPattern),
+					builder.like(builder.lower(createdByUser.get("email")), containsPattern));
 		};
 	}
 
-	private static Specification<Claim> createdBy(String value) {
+	private static Specification<Claim> createdByUserMatches(String searchText) {
 		return (root, query, builder) -> {
-			if (!StringUtils.hasText(value)) {
+			if (!StringUtils.hasText(searchText)) {
 				return builder.conjunction();
 			}
-			String trimmed = value.trim();
-			String pattern = contains(trimmed);
-			var createdBy = root.join("createdBy", JoinType.LEFT);
-			var byUsernameOrEmail = builder.or(
-					builder.like(builder.lower(createdBy.get("username")), pattern),
-					builder.like(builder.lower(createdBy.get("email")), pattern));
-			if (trimmed.matches("\\d+")) {
-				return builder.or(byUsernameOrEmail, builder.equal(createdBy.get("id"), Long.valueOf(trimmed)));
+
+			String trimmedSearchText = searchText.trim();
+			String containsPattern = containsPattern(trimmedSearchText);
+			var createdByUser = root.join("createdBy", JoinType.LEFT);
+			var usernameOrEmailMatches = builder.or(
+					builder.like(builder.lower(createdByUser.get("username")), containsPattern),
+					builder.like(builder.lower(createdByUser.get("email")), containsPattern));
+
+			if (trimmedSearchText.matches("\\d+")) {
+				return builder.or(
+						usernameOrEmailMatches,
+						builder.equal(createdByUser.get("id"), Long.valueOf(trimmedSearchText)));
 			}
-			return byUsernameOrEmail;
+
+			return usernameOrEmailMatches;
 		};
 	}
 
-	private static String contains(String value) {
-		return "%" + value.trim().toLowerCase(Locale.ROOT) + "%";
+	private static String containsPattern(String searchText) {
+		return "%" + searchText.trim().toLowerCase(Locale.ROOT) + "%";
 	}
 
-	private static Instant startOfDay(java.time.LocalDate date) {
+	private static Instant utcStartOfDay(LocalDate date) {
 		return date.atTime(LocalTime.MIDNIGHT).toInstant(ZoneOffset.UTC);
 	}
 }

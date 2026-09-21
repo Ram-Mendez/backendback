@@ -2,35 +2,35 @@
   <div class="attachments-header">
     <div>
       <h3 id="claim-attachments-title">Adjuntos</h3>
-      <p>{{ attachments().length }} archivos guardados</p>
+      <p>{{ claimAttachments().length }} archivos guardados</p>
     </div>
-    @if (loading()) {
+    @if (isAttachmentListLoading()) {
       <span class="attachments-loading" aria-live="polite">Cargando...</span>
     }
   </div>
 
-  @if (errorMessage()) {
-    <div class="attachments-alert" role="alert">{{ errorMessage() }}</div>
+  @if (attachmentErrorMessage()) {
+    <div class="attachments-alert" role="alert">{{ attachmentErrorMessage() }}</div>
   }
 
   @if (editable) {
     <div
       class="dropzone"
-      [class.dropzone-active]="dropActive()"
-      (dragover)="onDragOver($event)"
-      (dragleave)="onDragLeave($event)"
-      (drop)="onDrop($event)">
-      <input #fileInput class="sr-only" type="file" multiple (change)="selectFiles($event)">
-      <input #folderInput class="sr-only" type="file" multiple webkitdirectory (change)="selectFolder($event)">
+      [class.dropzone-active]="isAttachmentDropZoneActive()"
+      (dragover)="handleAttachmentDragOver($event)"
+      (dragleave)="handleAttachmentDragLeave($event)"
+      (drop)="handleAttachmentDrop($event)">
+      <input #fileInput class="sr-only" type="file" multiple (change)="selectAttachmentFiles($event)">
+      <input #folderInput class="sr-only" type="file" multiple webkitdirectory (change)="selectAttachmentFolder($event)">
       <div>
         <strong>Arrastra archivos o carpetas aqui</strong>
         <span>Tambien puedes seleccionar archivos o una carpeta completa.</span>
       </div>
       <div class="dropzone-actions">
-        <button class="secondary-button compact" type="button" (click)="fileInput.click()" [disabled]="uploading()">
+        <button class="secondary-button compact" type="button" (click)="fileInput.click()" [disabled]="isAttachmentUploadInProgress()">
           Seleccionar archivos
         </button>
-        <button class="secondary-button compact" type="button" (click)="folderInput.click()" [disabled]="uploading()">
+        <button class="secondary-button compact" type="button" (click)="folderInput.click()" [disabled]="isAttachmentUploadInProgress()">
           Seleccionar carpeta
         </button>
       </div>
@@ -39,38 +39,40 @@
     <p class="readonly-note">Los adjuntos solo se pueden modificar mientras la reclamacion sea editable.</p>
   }
 
-  @if (queuedFiles().length > 0) {
+  @if (queuedAttachmentFiles().length > 0) {
     <section class="queue" aria-labelledby="attachment-queue-title">
       <div class="queue-header">
         <div>
           <h4 id="attachment-queue-title">Pendientes de envio</h4>
-          <p>{{ queueSummary() }}</p>
-          @if (batchProgress()) {
-            <p>{{ batchProgress() }}</p>
+          <p>{{ attachmentQueueSummary() }}</p>
+          @if (attachmentBatchProgress()) {
+            <p>{{ attachmentBatchProgress() }}</p>
           }
-          @if (queueLimitMessage(); as limitMessage) {
+          @if (attachmentQueueLimitMessage(); as limitMessage) {
             <p class="queue-limit" role="alert">{{ limitMessage }}</p>
           }
         </div>
-        <button class="primary-button compact" type="button" (click)="uploadQueuedFiles()" [disabled]="!canStartUpload()">
-          {{ uploading() ? 'Subiendo...' : 'Subir adjuntos' }}
+        <button class="primary-button compact" type="button" (click)="uploadQueuedAttachmentFiles()" [disabled]="!canStartAttachmentUpload()">
+          {{ isAttachmentUploadInProgress() ? 'Subiendo...' : 'Subir adjuntos' }}
         </button>
       </div>
 
       <ul class="queue-list">
-        @for (item of queuedFiles(); track trackQueuedFile($index, item)) {
+        @for (queuedFile of queuedAttachmentFiles(); track trackQueuedFile($index, queuedFile)) {
           <li class="queue-item">
             <div class="file-main">
-              <strong>{{ item.name }}</strong>
-              <span>{{ item.relativePath }}</span>
-              @if (item.errorMessage) {
-                <small>{{ item.errorMessage }}</small>
+              <strong>{{ queuedFile.name }}</strong>
+              <span>{{ queuedFile.relativePath }}</span>
+              @if (queuedFile.errorMessage) {
+                <small>{{ queuedFile.errorMessage }}</small>
               }
             </div>
-            <span class="file-meta">{{ formatBytes(item.sizeBytes) }}</span>
-            <span class="file-meta">{{ item.contentType }}</span>
-            <span [class]="statusClass(item.status)">{{ statusLabel(item.status) }}</span>
-            <button class="link-button" type="button" (click)="removeQueuedFile(item.id)" [disabled]="item.status === 'uploading'">
+            <span class="file-meta">{{ formatBytes(queuedFile.sizeBytes) }}</span>
+            <span class="file-meta">{{ queuedFile.contentType }}</span>
+            <span [class]="queuedAttachmentStatusClass(queuedFile.status)">
+              {{ queuedAttachmentStatusLabel(queuedFile.status) }}
+            </span>
+            <button class="link-button" type="button" (click)="removeQueuedAttachmentFile(queuedFile.id)" [disabled]="queuedFile.status === 'uploading'">
               Quitar
             </button>
           </li>
@@ -80,12 +82,12 @@
   }
 
   <section class="attachments-list" aria-label="Adjuntos existentes">
-    @if (loading() && attachments().length === 0) {
+    @if (isAttachmentListLoading() && claimAttachments().length === 0) {
       <div class="attachments-state" aria-live="polite">Cargando adjuntos...</div>
-    } @else if (attachments().length === 0) {
+    } @else if (claimAttachments().length === 0) {
       <div class="attachments-state">Sin adjuntos.</div>
     } @else {
-      @for (attachment of attachments(); track trackAttachment($index, attachment)) {
+      @for (attachment of claimAttachments(); track trackAttachment($index, attachment)) {
         <article class="attachment-row">
           <div class="file-main">
             <strong>{{ attachment.fileName }}</strong>
@@ -96,12 +98,12 @@
             </small>
           </div>
           <div class="attachment-row-actions">
-            <button class="link-button" type="button" (click)="downloadAttachment(attachment)">
+            <button class="link-button" type="button" (click)="downloadClaimAttachment(attachment)">
               Descargar
             </button>
             @if (editable) {
-              <button class="link-button danger-link" type="button" (click)="deleteAttachment(attachment)" [disabled]="isDeleting(attachment.id)">
-                {{ isDeleting(attachment.id) ? 'Eliminando...' : 'Eliminar' }}
+              <button class="link-button danger-link" type="button" (click)="deleteClaimAttachment(attachment)" [disabled]="isAttachmentBeingDeleted(attachment.id)">
+                {{ isAttachmentBeingDeleted(attachment.id) ? 'Eliminando...' : 'Eliminar' }}
               </button>
             }
           </div>

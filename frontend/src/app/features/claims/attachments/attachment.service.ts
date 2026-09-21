@@ -9,37 +9,37 @@ import { AttachmentCapabilitiesResponse, AttachmentResponse, AttachmentUploadIte
 export class AttachmentService {
   private readonly http = inject(HttpClient);
   private readonly apiBaseUrl = inject(API_BASE_URL);
-  private readonly claimsUrl = `${this.apiBaseUrl}/v1/claims`;
+  private readonly claimsEndpoint = `${this.apiBaseUrl}/v1/claims`;
 
-  list(claimId: number): Observable<AttachmentResponse[]> {
-    return this.http.get<AttachmentResponse[]>(this.attachmentsUrl(claimId));
+  loadClaimAttachments(claimId: number): Observable<AttachmentResponse[]> {
+    return this.http.get<AttachmentResponse[]>(this.claimAttachmentsEndpoint(claimId));
   }
 
-  capabilities(claimId: number): Observable<AttachmentCapabilitiesResponse> {
-    return this.http.get<AttachmentCapabilitiesResponse>(`${this.attachmentsUrl(claimId)}/capabilities`);
+  loadAttachmentCapabilities(claimId: number): Observable<AttachmentCapabilitiesResponse> {
+    return this.http.get<AttachmentCapabilitiesResponse>(`${this.claimAttachmentsEndpoint(claimId)}/capabilities`);
   }
 
-  upload(claimId: number, items: AttachmentUploadItem[]): Observable<AttachmentResponse[]> {
+  uploadClaimAttachments(claimId: number, uploadItems: AttachmentUploadItem[]): Observable<AttachmentResponse[]> {
     const formData = new FormData();
-    for (const item of items) {
-      formData.append('files', item.file, item.file.name);
-      formData.append('relativePaths', item.relativePath);
+    for (const uploadItem of uploadItems) {
+      formData.append('files', uploadItem.file, uploadItem.file.name);
+      formData.append('relativePaths', uploadItem.relativePath);
     }
-    return this.http.post<AttachmentResponse[]>(this.attachmentsUrl(claimId), formData);
+    return this.http.post<AttachmentResponse[]>(this.claimAttachmentsEndpoint(claimId), formData);
   }
 
-  download(claimId: number, attachmentId: string): Observable<HttpResponse<Blob>> {
-    return this.http.get(`${this.attachmentsUrl(claimId)}/${attachmentId}/content`, {
+  downloadClaimAttachment(claimId: number, attachmentId: string): Observable<HttpResponse<Blob>> {
+    return this.http.get(`${this.claimAttachmentsEndpoint(claimId)}/${attachmentId}/content`, {
       observe: 'response',
       responseType: 'blob'
     });
   }
 
-  delete(claimId: number, attachmentId: string): Observable<void> {
-    return this.http.delete<void>(`${this.attachmentsUrl(claimId)}/${attachmentId}`);
+  deleteClaimAttachment(claimId: number, attachmentId: string): Observable<void> {
+    return this.http.delete<void>(`${this.claimAttachmentsEndpoint(claimId)}/${attachmentId}`);
   }
 
-  private attachmentsUrl(claimId: number): string {
-    return `${this.claimsUrl}/${claimId}/attachments`;
+  private claimAttachmentsEndpoint(claimId: number): string {
+    return `${this.claimsEndpoint}/${claimId}/attachments`;
   }
 }

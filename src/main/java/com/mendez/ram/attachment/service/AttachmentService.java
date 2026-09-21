@@ -50,129 +50,178 @@ public class AttachmentService {
 	private static final String DEFAULT_CONTENT_TYPE = "application/octet-stream";
 	private static final int SIGNATURE_BYTES = 512;
 
-	private final ClaimAttachmentRepository attachmentRepository;
+	private final ClaimAttachmentRepository claimAttachmentRepository;
 	private final AuthUserRepository authUserRepository;
 	private final ClaimService claimService;
 	private final AttachmentStorage attachmentStorage;
 	private final AttachmentPathSanitizer pathSanitizer;
 	private final AttachmentMapper attachmentMapper;
-	private final AttachmentProperties properties;
+	private final AttachmentProperties attachmentProperties;
 	private final Clock clock;
 
-	public AttachmentService(ClaimAttachmentRepository attachmentRepository, AuthUserRepository authUserRepository,
+	public AttachmentService(ClaimAttachmentRepository claimAttachmentRepository, AuthUserRepository authUserRepository,
 			ClaimService claimService, AttachmentStorage attachmentStorage, AttachmentPathSanitizer pathSanitizer,
-			AttachmentMapper attachmentMapper, AttachmentProperties properties, Clock clock) {
-		this.attachmentRepository = attachmentRepository;
+			AttachmentMapper attachmentMapper, AttachmentProperties attachmentProperties, Clock clock) {
+		this.claimAttachmentRepository = claimAttachmentRepository;
 		this.authUserRepository = authUserRepository;
 		this.claimService = claimService;
 		this.attachmentStorage = attachmentStorage;
 		this.pathSanitizer = pathSanitizer;
 		this.attachmentMapper = attachmentMapper;
-		this.properties = properties;
+		this.attachmentProperties = attachmentProperties;
 		this.clock = clock;
 	}
 
 	@Transactional(readOnly = true)
-	public List<AttachmentResponse> findAll(Long claimId, AuthenticatedUser principal) {
-		claimService.requireViewableClaim(claimId, principal);
-		return attachmentRepository.findByClaimIdOrderByRelativePathAscCreatedAtAsc(claimId)
+	public List<AttachmentResponse> findClaimAttachments(Long claimId, AuthenticatedUser principal) {
+		claimService.findViewableClaim(claimId, principal);
+		return claimAttachmentRepository.findByClaimIdOrderByRelativePathAscCreatedAtAsc(claimId)
 				.stream()
-				.map(attachmentMapper::toResponse)
+				.map(attachmentMapper::toAttachmentResponse)
 				.toList();
 	}
 
 	@Transactional(readOnly = true)
-	public AttachmentCapabilitiesResponse capabilities(Long claimId, AuthenticatedUser principal) {
-		claimService.requireViewableClaim(claimId, principal);
+	public AttachmentCapabilitiesResponse loadClaimAttachmentCapabilities(Long claimId, AuthenticatedUser principal) {
+		claimService.findViewableClaim(claimId, principal);
 		return new AttachmentCapabilitiesResponse(
-				properties.getMaxFileSize().toBytes(),
-				properties.getMaxRequestSize().toBytes(),
-				properties.getMaxFilesPerRequest());
+				attachmentProperties.getMaxFileSize().toBytes(),
+				attachmentProperties.getMaxRequestSize().toBytes(),
+				attachmentProperties.getMaxFilesPerRequest());
 	}
 
 	@Transactional
-	public List<AttachmentResponse> upload(Long claimId, List<MultipartFile> files, List<String> relativePaths,
+	public List<AttachmentResponse> uploadClaimAttachments(Long claimId, List<MultipartFile> attachmentFiles,
+			List<String> relativePaths,
 			AuthenticatedUser principal) {
-		validateRequestShape(files, relativePaths);
-		Claim claim = claimService.requireEditableClaimLocked(claimId, principal);
-		AuthUser actor = findActor(principal);
+		ensureValidAttachmentUploadRequest(attachmentFiles, relativePaths);
+		Claim claim = claimService.findEditableClaimWithLock(claimId, principal);
+		AuthUser actingUser = findAuthenticatedUser(principal);
 		List<String> storedStorageKeys = new ArrayList<>();
 		registerUploadRollbackCleanup(claimId, storedStorageKeys);
-		Set<String> usedRelativePaths = attachmentRepository.findByClaimIdOrderByRelativePathAscCreatedAtAsc(claimId)
+		Set<String> usedRelativePaths = claimAttachmentRepository.findByClaimIdOrderByRelativePathAscCreatedAtAsc(claimId)
 				.stream()
 				.map(ClaimAttachment::getRelativePath)
 				.collect(Collectors.toCollection(HashSet::new));
-		List<AttachmentResponse> responses = new ArrayList<>();
+		List<AttachmentResponse> uploadedAttachments = new ArrayList<>();
 		try {
-			for (int index = 0; index < files.size(); index++) {
-				MultipartFile file = files.get(index);
-				String submittedPath = relativePaths == null ? null : relativePaths.get(index);
-				responses.add(uploadOne(claim, actor, file, submittedPath, usedRelativePaths, storedStorageKeys));
+			for (int index = 0; index < attachmentFiles.size(); index++) {
+				MultipartFile attachmentFile = attachmentFiles.get(index);
+				String submittedRelativePath = relativePaths == null ? null : relativePaths.get(index);
+				uploadedAttachments.add(uploadSingleClaimAttachment(
+						claim,
+						actingUser,
+						attachmentFile,
+						submittedRelativePath,
+						usedRelativePaths,
+						storedStorageKeys));
 			}
-			attachmentRepository.flush();
-			return responses;
+			claimAttachmentRepository.flush();
+			return uploadedAttachments;
 		}
 		catch (DataIntegrityViolationException exception) {
-			LOGGER.warn("Attachment metadata conflict claimId={} cause={}", claimId, rootCauseMessage(exception));
+			LOGGER.warn("Attachment metadata conflict claimId={} cause={}", claimId, mostSpecificCauseMessage(exception));
 			throw new ApiException(HttpStatus.CONFLICT, "ATTACHMENT_CONFLICT",
 					"No se ha podido guardar el adjunto porque entra en conflicto con otro adjunto existente.");
 		}
 	}
 
 	@Transactional(readOnly = true)
-	public AttachmentDownload download(Long claimId, UUID attachmentId, AuthenticatedUser principal) {
-		claimService.requireViewableClaim(claimId, principal);
-		ClaimAttachment attachment = findAttachment(claimId, attachmentId);
-		StoredAttachmentResource resource = attachmentStorage.load(attachment.getStorageKey());
+	public AttachmentDownload downloadClaimAttachment(Long claimId, UUID attachmentId, AuthenticatedUser principal) {
+		claimService.findViewableClaim(claimId, principal);
+		ClaimAttachment attachment = findAttachmentByClaimAndId(claimId, attachmentId);
+		StoredAttachmentResource storedResource = attachmentStorage.load(attachment.getStorageKey());
 		LOGGER.info("Attachment {} downloaded from claim {} by user {}", attachmentId, claimId, principal.id());
-		return new AttachmentDownload(attachment, resource.inputStream(), resource.sizeBytes());
+		return new AttachmentDownload(attachment, storedResource.inputStream(), storedResource.sizeBytes());
 	}
 
 	@Transactional
-	public void delete(Long claimId, UUID attachmentId, AuthenticatedUser principal) {
-		Claim claim = claimService.requireEditableClaimLocked(claimId, principal);
-		ClaimAttachment attachment = findAttachment(claimId, attachmentId);
-		AuthUser actor = findActor(principal);
+	public void deleteClaimAttachment(Long claimId, UUID attachmentId, AuthenticatedUser principal) {
+		Claim claim = claimService.findEditableClaimWithLock(claimId, principal);
+		ClaimAttachment attachment = findAttachmentByClaimAndId(claimId, attachmentId);
+		AuthUser actingUser = findAuthenticatedUser(principal);
 		String storageKey = attachment.getStorageKey();
-		attachmentRepository.delete(attachment);
-		attachmentRepository.flush();
-		claimService.recordAttachmentEvent(claim, actor, ClaimHistoryEventType.ATTACHMENT_DELETED, "attachmentId=" + attachmentId);
+		claimAttachmentRepository.delete(attachment);
+		claimAttachmentRepository.flush();
+		claimService.recordClaimAttachmentEvent(
+				claim, actingUser, ClaimHistoryEventType.ATTACHMENT_DELETED, "attachmentId=" + attachmentId);
 		deleteStorageAfterCommit(storageKey, attachment.getId(), claimId);
 		LOGGER.info("Attachment {} deleted from claim {} by user {}", attachment.getId(), claimId, principal.id());
 	}
 
-	private AttachmentResponse uploadOne(Claim claim, AuthUser actor, MultipartFile file, String submittedPath,
+	private AttachmentResponse uploadSingleClaimAttachment(
+			Claim claim,
+			AuthUser actingUser,
+			MultipartFile attachmentFile,
+			String submittedRelativePath,
 			Set<String> usedRelativePaths, List<String> storedStorageKeys) {
-		validateFile(file);
-		SanitizedAttachmentPath sanitizedPath = pathSanitizer.sanitize(submittedPath, file.getOriginalFilename());
-		String relativePath = uniqueRelativePath(sanitizedPath.relativePath(), usedRelativePaths);
-		String fileName = fileNameOf(relativePath);
-		String contentType = resolveContentType(file, fileName);
+		ensureAttachmentFileIsValid(attachmentFile);
+		SanitizedAttachmentPath sanitizedPath = pathSanitizer.sanitize(
+				submittedRelativePath,
+				attachmentFile.getOriginalFilename());
+		String relativePath = generateUniqueRelativePath(sanitizedPath.relativePath(), usedRelativePaths);
+		String fileName = fileNameFromRelativePath(relativePath);
+		String contentType = resolveAttachmentContentType(attachmentFile, fileName);
+		ClaimAttachment storedClaimAttachment = createStoredClaimAttachment(
+				claim,
+				actingUser,
+				attachmentFile,
+				fileName,
+				relativePath,
+				contentType,
+				storedStorageKeys);
+		ClaimAttachment savedAttachment = saveClaimAttachmentAndRecordHistory(
+				claim,
+				actingUser,
+				storedClaimAttachment);
+		usedRelativePaths.add(relativePath);
+		LOGGER.info("Attachment {} uploaded to claim {} by user {} path={} sizeBytes={}",
+				savedAttachment.getId(), claim.getId(), actingUser.getId(), savedAttachment.getRelativePath(),
+				savedAttachment.getSizeBytes());
+		return attachmentMapper.toAttachmentResponse(savedAttachment);
+	}
 
+	private ClaimAttachment createStoredClaimAttachment(
+			Claim claim,
+			AuthUser actingUser,
+			MultipartFile attachmentFile,
+			String fileName,
+			String relativePath,
+			String contentType,
+			List<String> storedStorageKeys) {
 		UUID attachmentId = UUID.randomUUID();
 		String storageKey = "claims/" + claim.getId() + "/" + attachmentId + "/" + fileName;
-		StoredAttachment stored = storeFile(storageKey, file);
+		StoredAttachment storedAttachment = storeAttachmentFile(storageKey, attachmentFile);
 		storedStorageKeys.add(storageKey);
-		ClaimAttachment attachment = new ClaimAttachment(
+		return new ClaimAttachment(
 				attachmentId,
 				claim,
 				fileName,
 				relativePath,
 				storageKey,
 				contentType,
-				stored.sizeBytes(),
-				stored.sha256(),
-				actor,
+				storedAttachment.sizeBytes(),
+				storedAttachment.sha256(),
+				actingUser,
 				Instant.now(clock));
-		ClaimAttachment saved = attachmentRepository.save(attachment);
-		claimService.recordAttachmentEvent(claim, actor, ClaimHistoryEventType.ATTACHMENT_UPLOADED, "attachmentId=" + saved.getId() + ",path=" + saved.getRelativePath());
-		usedRelativePaths.add(relativePath);
-		LOGGER.info("Attachment {} uploaded to claim {} by user {} path={} sizeBytes={}",
-				saved.getId(), claim.getId(), actor.getId(), saved.getRelativePath(), saved.getSizeBytes());
-		return attachmentMapper.toResponse(saved);
 	}
 
-	private StoredAttachment storeFile(String storageKey, MultipartFile file) {
+	private ClaimAttachment saveClaimAttachmentAndRecordHistory(
+			Claim claim,
+			AuthUser actingUser,
+			ClaimAttachment claimAttachment) {
+		ClaimAttachment savedAttachment = claimAttachmentRepository.save(claimAttachment);
+		String attachmentHistoryData = "attachmentId=" + savedAttachment.getId()
+				+ ",path=" + savedAttachment.getRelativePath();
+		claimService.recordClaimAttachmentEvent(
+				claim,
+				actingUser,
+				ClaimHistoryEventType.ATTACHMENT_UPLOADED,
+				attachmentHistoryData);
+		return savedAttachment;
+	}
+
+	private StoredAttachment storeAttachmentFile(String storageKey, MultipartFile file) {
 		try {
 			return attachmentStorage.store(new StoreAttachmentCommand(storageKey, file.getInputStream()));
 		}
@@ -183,75 +232,77 @@ public class AttachmentService {
 		}
 	}
 
-	private ClaimAttachment findAttachment(Long claimId, UUID attachmentId) {
-		return attachmentRepository.findByIdAndClaimId(attachmentId, claimId)
+	private ClaimAttachment findAttachmentByClaimAndId(Long claimId, UUID attachmentId) {
+		return claimAttachmentRepository.findByIdAndClaimId(attachmentId, claimId)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ATTACHMENT_NOT_FOUND",
 						"No existe el adjunto solicitado."));
 	}
 
-	private AuthUser findActor(AuthenticatedUser principal) {
+	private AuthUser findAuthenticatedUser(AuthenticatedUser principal) {
 		return authUserRepository.findById(principal.id())
 				.orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED",
 						"Debes autenticarte para acceder a este recurso."));
 	}
 
-	private void validateRequestShape(List<MultipartFile> files, List<String> relativePaths) {
-		if (files == null || files.isEmpty()) {
+	private void ensureValidAttachmentUploadRequest(
+			List<MultipartFile> attachmentFiles,
+			List<String> relativePaths) {
+		if (attachmentFiles == null || attachmentFiles.isEmpty()) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "ATTACHMENT_REQUIRED",
 					"Debes adjuntar al menos un archivo.");
 		}
-		if (files.size() > properties.getMaxFilesPerRequest()) {
+		if (attachmentFiles.size() > attachmentProperties.getMaxFilesPerRequest()) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "ATTACHMENT_LIMIT_EXCEEDED",
 					"Demasiados archivos adjuntos en una unica solicitud.");
 		}
-		if (relativePaths != null && relativePaths.size() != files.size()) {
+		if (relativePaths != null && relativePaths.size() != attachmentFiles.size()) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ATTACHMENT_PATH",
 					"Cada archivo debe incluir una ruta relativa.");
 		}
 		long totalSizeBytes = 0;
-		for (MultipartFile file : files) {
-			if (file != null) {
-				totalSizeBytes += file.getSize();
+		for (MultipartFile attachmentFile : attachmentFiles) {
+			if (attachmentFile != null) {
+				totalSizeBytes += attachmentFile.getSize();
 			}
 		}
-		if (totalSizeBytes > properties.getMaxRequestSize().toBytes()) {
+		if (totalSizeBytes > attachmentProperties.getMaxRequestSize().toBytes()) {
 			throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "ATTACHMENT_REQUEST_TOO_LARGE",
 					"El conjunto de adjuntos supera el tamano maximo permitido.");
 		}
 	}
 
-	private void validateFile(MultipartFile file) {
+	private void ensureAttachmentFileIsValid(MultipartFile file) {
 		if (file == null || (file.isEmpty() && !StringUtils.hasText(file.getOriginalFilename()))) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "ATTACHMENT_REQUIRED",
 					"Debes adjuntar al menos un archivo valido.");
 		}
-		if (file.getSize() > properties.getMaxFileSize().toBytes()) {
+		if (file.getSize() > attachmentProperties.getMaxFileSize().toBytes()) {
 			throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "ATTACHMENT_FILE_TOO_LARGE",
 					"El archivo adjunto supera el tamano maximo permitido.");
 		}
 	}
 
-	private String resolveContentType(MultipartFile file, String fileName) {
-		byte[] signature = readSignature(file);
-		validateKnownContentSignature(fileName, signature);
-		return normalizeContentType(file.getContentType());
+	private String resolveAttachmentContentType(MultipartFile file, String fileName) {
+		byte[] contentSignatureBytes = readAttachmentSignature(file);
+		ensureKnownContentSignatureMatches(fileName, contentSignatureBytes);
+		return normalizeAttachmentContentType(file.getContentType());
 	}
 
-	private void validateKnownContentSignature(String fileName, byte[] signature) {
-		String extension = extensionOf(fileName);
-		if (!requiresKnownSignature(extension)) {
+	private void ensureKnownContentSignatureMatches(String fileName, byte[] contentSignatureBytes) {
+		String fileExtension = fileExtension(fileName);
+		if (!requiresKnownContentSignature(fileExtension)) {
 			return;
 		}
-		ContentSignature contentSignature = detectSignature(signature);
-		if (!signatureMatchesExtension(extension, contentSignature)) {
+		ContentSignature contentSignature = detectContentSignature(contentSignatureBytes);
+		if (!contentSignatureMatchesExtension(fileExtension, contentSignature)) {
 			throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "ATTACHMENT_TYPE_NOT_ALLOWED",
 					"El contenido del adjunto no corresponde a la extension indicada.");
 		}
 	}
 
-	private byte[] readSignature(MultipartFile file) {
-		try (InputStream input = file.getInputStream()) {
-			return input.readNBytes(SIGNATURE_BYTES);
+	private byte[] readAttachmentSignature(MultipartFile file) {
+		try (InputStream attachmentInputStream = file.getInputStream()) {
+			return attachmentInputStream.readNBytes(SIGNATURE_BYTES);
 		}
 		catch (IOException exception) {
 			LOGGER.error("Multipart stream could not be inspected filename={}", file.getOriginalFilename(), exception);
@@ -260,27 +311,29 @@ public class AttachmentService {
 		}
 	}
 
-	private static boolean requiresKnownSignature(String extension) {
-		return switch (extension) {
+	private static boolean requiresKnownContentSignature(String fileExtension) {
+		return switch (fileExtension) {
 			case "pdf", "png", "jpg", "jpeg", "gif", "webp", "zip", "doc", "xls", "ppt", "docx", "xlsx",
 					"pptx", "rar", "7z", "gz", "gzip", "tgz", "tar" -> true;
 			default -> false;
 		};
 	}
 
-	private static boolean signatureMatchesExtension(String extension, ContentSignature signature) {
-		return switch (extension) {
-			case "pdf" -> signature == ContentSignature.PDF;
-			case "png" -> signature == ContentSignature.PNG;
-			case "jpg", "jpeg" -> signature == ContentSignature.JPEG;
-			case "gif" -> signature == ContentSignature.GIF;
-			case "webp" -> signature == ContentSignature.WEBP;
-			case "zip", "docx", "xlsx", "pptx" -> signature == ContentSignature.ZIP;
-			case "doc", "xls", "ppt" -> signature == ContentSignature.OLE_COMPOUND;
-			case "rar" -> signature == ContentSignature.RAR;
-			case "7z" -> signature == ContentSignature.SEVEN_Z;
-			case "gz", "gzip", "tgz" -> signature == ContentSignature.GZIP;
-			case "tar" -> signature == ContentSignature.TAR;
+	private static boolean contentSignatureMatchesExtension(
+			String fileExtension,
+			ContentSignature contentSignature) {
+		return switch (fileExtension) {
+			case "pdf" -> contentSignature == ContentSignature.PDF;
+			case "png" -> contentSignature == ContentSignature.PNG;
+			case "jpg", "jpeg" -> contentSignature == ContentSignature.JPEG;
+			case "gif" -> contentSignature == ContentSignature.GIF;
+			case "webp" -> contentSignature == ContentSignature.WEBP;
+			case "zip", "docx", "xlsx", "pptx" -> contentSignature == ContentSignature.ZIP;
+			case "doc", "xls", "ppt" -> contentSignature == ContentSignature.OLE_COMPOUND;
+			case "rar" -> contentSignature == ContentSignature.RAR;
+			case "7z" -> contentSignature == ContentSignature.SEVEN_Z;
+			case "gz", "gzip", "tgz" -> contentSignature == ContentSignature.GZIP;
+			case "tar" -> contentSignature == ContentSignature.TAR;
 			default -> true;
 		};
 	}
@@ -289,18 +342,20 @@ public class AttachmentService {
 		if (!TransactionSynchronizationManager.isSynchronizationActive()) {
 			return;
 		}
-		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-			@Override
-			public void afterCompletion(int status) {
-				if (status != STATUS_COMMITTED
-						|| (status == STATUS_COMMITTED && storedStorageKeys.stream().anyMatch(key -> key.endsWith(".csv")))) {
-					cleanupStoredKeys(claimId, storedStorageKeys);
+
+		TransactionSynchronizationManager.registerSynchronization(
+				new TransactionSynchronization() {
+					@Override
+					public void afterCompletion(int status) {
+						if (status != STATUS_COMMITTED) {
+							cleanupRolledBackStorageKeys(claimId, storedStorageKeys);
+						}
+					}
 				}
-			}
-		});
+		);
 	}
 
-	private void cleanupStoredKeys(Long claimId, List<String> storedStorageKeys) {
+	private void cleanupRolledBackStorageKeys(Long claimId, List<String> storedStorageKeys) {
 		for (String storageKey : storedStorageKeys) {
 			try {
 				attachmentStorage.delete(storageKey);
@@ -315,18 +370,18 @@ public class AttachmentService {
 
 	private void deleteStorageAfterCommit(String storageKey, UUID attachmentId, Long claimId) {
 		if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-			safeDeleteStorage(storageKey, attachmentId, claimId);
+			deleteAttachmentStorageSafely(storageKey, attachmentId, claimId);
 			return;
 		}
 		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
 			@Override
 			public void afterCommit() {
-				safeDeleteStorage(storageKey, attachmentId, claimId);
+				deleteAttachmentStorageSafely(storageKey, attachmentId, claimId);
 			}
 		});
 	}
 
-	private void safeDeleteStorage(String storageKey, UUID attachmentId, Long claimId) {
+	private void deleteAttachmentStorageSafely(String storageKey, UUID attachmentId, Long claimId) {
 		try {
 			attachmentStorage.delete(storageKey);
 		}
@@ -336,15 +391,15 @@ public class AttachmentService {
 		}
 	}
 
-	private static String rootCauseMessage(Throwable throwable) {
-		Throwable current = throwable;
-		while (current.getCause() != null) {
-			current = current.getCause();
+	private static String mostSpecificCauseMessage(Throwable throwable) {
+		Throwable rootCause = throwable;
+		while (rootCause.getCause() != null) {
+			rootCause = rootCause.getCause();
 		}
-		return current.getClass().getSimpleName() + ": " + current.getMessage();
+		return rootCause.getClass().getSimpleName() + ": " + rootCause.getMessage();
 	}
 
-	private static String uniqueRelativePath(String relativePath, Set<String> usedRelativePaths) {
+	private static String generateUniqueRelativePath(String relativePath, Set<String> usedRelativePaths) {
 		if (!usedRelativePaths.contains(relativePath)) {
 			return relativePath;
 		}
@@ -363,113 +418,113 @@ public class AttachmentService {
 			extension = fileName.substring(dotIndex);
 		}
 		int suffix = 1;
-		String candidate;
+		String candidateRelativePath;
 		do {
-			candidate = directory + baseName + " (" + suffix + ")" + extension;
+			candidateRelativePath = directory + baseName + " (" + suffix + ")" + extension;
 			suffix++;
 		}
-		while (usedRelativePaths.contains(candidate));
-		return candidate;
+		while (usedRelativePaths.contains(candidateRelativePath));
+		return candidateRelativePath;
 	}
 
-	private static ContentSignature detectSignature(byte[] signature) {
-		if (startsWith(signature, "%PDF-".getBytes(StandardCharsets.US_ASCII))) {
+	private static ContentSignature detectContentSignature(byte[] contentBytes) {
+		if (bytesStartWith(contentBytes, "%PDF-".getBytes(StandardCharsets.US_ASCII))) {
 			return ContentSignature.PDF;
 		}
-		if (startsWith(signature, new byte[] {
+		if (bytesStartWith(contentBytes, new byte[] {
 				(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A })) {
 			return ContentSignature.PNG;
 		}
-		if (signature.length >= 3
-				&& (signature[0] & 0xFF) == 0xFF
-				&& (signature[1] & 0xFF) == 0xD8
-				&& (signature[2] & 0xFF) == 0xFF) {
+		if (contentBytes.length >= 3
+				&& (contentBytes[0] & 0xFF) == 0xFF
+				&& (contentBytes[1] & 0xFF) == 0xD8
+				&& (contentBytes[2] & 0xFF) == 0xFF) {
 			return ContentSignature.JPEG;
 		}
-		if (startsWith(signature, "GIF87a".getBytes(StandardCharsets.US_ASCII))
-				|| startsWith(signature, "GIF89a".getBytes(StandardCharsets.US_ASCII))) {
+		if (bytesStartWith(contentBytes, "GIF87a".getBytes(StandardCharsets.US_ASCII))
+				|| bytesStartWith(contentBytes, "GIF89a".getBytes(StandardCharsets.US_ASCII))) {
 			return ContentSignature.GIF;
 		}
-		if (startsWith(signature, "RIFF".getBytes(StandardCharsets.US_ASCII))
-				&& signature.length >= 12
-				&& signature[8] == 'W'
-				&& signature[9] == 'E'
-				&& signature[10] == 'B'
-				&& signature[11] == 'P') {
+		if (bytesStartWith(contentBytes, "RIFF".getBytes(StandardCharsets.US_ASCII))
+				&& contentBytes.length >= 12
+				&& contentBytes[8] == 'W'
+				&& contentBytes[9] == 'E'
+				&& contentBytes[10] == 'B'
+				&& contentBytes[11] == 'P') {
 			return ContentSignature.WEBP;
 		}
-		if (isZip(signature)) {
+		if (hasZipSignature(contentBytes)) {
 			return ContentSignature.ZIP;
 		}
-		if (startsWith(signature, new byte[] {
+		if (bytesStartWith(contentBytes, new byte[] {
 				(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0, (byte) 0xA1, (byte) 0xB1, 0x1A,
 				(byte) 0xE1 })) {
 			return ContentSignature.OLE_COMPOUND;
 		}
-		if (startsWith(signature, new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00 })
-				|| startsWith(signature, new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00 })) {
+		if (bytesStartWith(contentBytes, new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00 })
+				|| bytesStartWith(contentBytes, new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00 })) {
 			return ContentSignature.RAR;
 		}
-		if (startsWith(signature, new byte[] { 0x37, 0x7A, (byte) 0xBC, (byte) 0xAF, 0x27, 0x1C })) {
+		if (bytesStartWith(contentBytes, new byte[] { 0x37, 0x7A, (byte) 0xBC, (byte) 0xAF, 0x27, 0x1C })) {
 			return ContentSignature.SEVEN_Z;
 		}
-		if (startsWith(signature, new byte[] { 0x1F, (byte) 0x8B })) {
+		if (bytesStartWith(contentBytes, new byte[] { 0x1F, (byte) 0x8B })) {
 			return ContentSignature.GZIP;
 		}
-		if (signature.length >= 263
-				&& signature[257] == 'u'
-				&& signature[258] == 's'
-				&& signature[259] == 't'
-				&& signature[260] == 'a'
-				&& signature[261] == 'r') {
+		if (contentBytes.length >= 263
+				&& contentBytes[257] == 'u'
+				&& contentBytes[258] == 's'
+				&& contentBytes[259] == 't'
+				&& contentBytes[260] == 'a'
+				&& contentBytes[261] == 'r') {
 			return ContentSignature.TAR;
 		}
 		return ContentSignature.UNKNOWN;
 	}
 
-	private static boolean startsWith(byte[] value, byte[] prefix) {
-		if (value.length < prefix.length) {
+	private static boolean bytesStartWith(byte[] contentBytes, byte[] expectedPrefix) {
+		if (contentBytes.length < expectedPrefix.length) {
 			return false;
 		}
-		for (int index = 0; index < prefix.length; index++) {
-			if (value[index] != prefix[index]) {
+		for (int index = 0; index < expectedPrefix.length; index++) {
+			if (contentBytes[index] != expectedPrefix[index]) {
 				return false;
 			}
 		}
 		return true;
 	}
 
-	private static boolean isZip(byte[] signature) {
-		return startsWith(signature, new byte[] { 0x50, 0x4B, 0x03, 0x04 })
-				|| startsWith(signature, new byte[] { 0x50, 0x4B, 0x05, 0x06 })
-				|| startsWith(signature, new byte[] { 0x50, 0x4B, 0x07, 0x08 });
+	private static boolean hasZipSignature(byte[] contentBytes) {
+		return bytesStartWith(contentBytes, new byte[] { 0x50, 0x4B, 0x03, 0x04 })
+				|| bytesStartWith(contentBytes, new byte[] { 0x50, 0x4B, 0x05, 0x06 })
+				|| bytesStartWith(contentBytes, new byte[] { 0x50, 0x4B, 0x07, 0x08 });
 	}
 
-	private static String normalizeContentType(String contentType) {
+	private static String normalizeAttachmentContentType(String contentType) {
 		if (!StringUtils.hasText(contentType)) {
 			return DEFAULT_CONTENT_TYPE;
 		}
 		int separatorIndex = contentType.indexOf(';');
-		String normalized = separatorIndex >= 0 ? contentType.substring(0, separatorIndex) : contentType;
-		normalized = normalized.trim().toLowerCase(Locale.ROOT);
-		if (normalized.isBlank() || normalized.length() > 255) {
+		String normalizedContentType = separatorIndex >= 0 ? contentType.substring(0, separatorIndex) : contentType;
+		normalizedContentType = normalizedContentType.trim().toLowerCase(Locale.ROOT);
+		if (normalizedContentType.isBlank() || normalizedContentType.length() > 255) {
 			return DEFAULT_CONTENT_TYPE;
 		}
 		try {
-			MediaType.parseMediaType(normalized);
-			return normalized;
+			MediaType.parseMediaType(normalizedContentType);
+			return normalizedContentType;
 		}
 		catch (RuntimeException exception) {
 			return DEFAULT_CONTENT_TYPE;
 		}
 	}
 
-	private static String fileNameOf(String relativePath) {
+	private static String fileNameFromRelativePath(String relativePath) {
 		int separatorIndex = relativePath.lastIndexOf('/');
 		return separatorIndex >= 0 ? relativePath.substring(separatorIndex + 1) : relativePath;
 	}
 
-	private static String extensionOf(String fileName) {
+	private static String fileExtension(String fileName) {
 		int dotIndex = fileName.lastIndexOf('.');
 		if (dotIndex < 1 || dotIndex == fileName.length() - 1) {
 			return "";

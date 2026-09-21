@@ -27,9 +27,9 @@ describe('AttachmentService', () => {
   it('lists claim attachments', () => {
     const response = [attachmentResponse()];
 
-    service.list(12).subscribe((attachments) => {
-      expect(attachments).toEqual(response);
-      expect(attachments[0].relativePath).toBe('docs/test.txt');
+    service.loadClaimAttachments(12).subscribe((claimAttachments) => {
+      expect(claimAttachments).toEqual(response);
+      expect(claimAttachments[0].relativePath).toBe('docs/test.txt');
     });
 
     const request = httpMock.expectOne('/api/v1/claims/12/attachments');
@@ -38,8 +38,8 @@ describe('AttachmentService', () => {
   });
 
   it('reads upload capabilities', () => {
-    service.capabilities(12).subscribe((capabilities) => {
-      expect(capabilities.maxFilesPerRequest).toBe(20);
+    service.loadAttachmentCapabilities(12).subscribe((attachmentCapabilities) => {
+      expect(attachmentCapabilities.maxFilesPerRequest).toBe(20);
     });
 
     const request = httpMock.expectOne('/api/v1/claims/12/attachments/capabilities');
@@ -52,12 +52,12 @@ describe('AttachmentService', () => {
   });
 
   it('uploads files using the backend multipart part names', () => {
-    const first = new File(['one'], 'one.txt', { type: 'text/plain' });
-    const second = new File(['two'], 'two.txt', { type: 'text/plain' });
+    const firstAttachmentFile = new File(['one'], 'one.txt', { type: 'text/plain' });
+    const secondAttachmentFile = new File(['two'], 'two.txt', { type: 'text/plain' });
 
-    service.upload(12, [
-      { file: first, relativePath: 'one.txt' },
-      { file: second, relativePath: 'folder/two.txt' }
+    service.uploadClaimAttachments(12, [
+      { file: firstAttachmentFile, relativePath: 'one.txt' },
+      { file: secondAttachmentFile, relativePath: 'folder/two.txt' }
     ]).subscribe();
 
     const request = httpMock.expectOne('/api/v1/claims/12/attachments');
@@ -65,13 +65,13 @@ describe('AttachmentService', () => {
     expect(request.request.body instanceof FormData).toBeTrue();
 
     const formData = request.request.body as FormData;
-    expect(formData.getAll('files')).toEqual([first, second]);
+    expect(formData.getAll('files')).toEqual([firstAttachmentFile, secondAttachmentFile]);
     expect(formData.getAll('relativePaths')).toEqual(['one.txt', 'folder/two.txt']);
     request.flush([attachmentResponse()]);
   });
 
   it('downloads attachment content as a blob response', () => {
-    service.download(12, 'attachment-id').subscribe((response) => {
+    service.downloadClaimAttachment(12, 'attachment-id').subscribe((response) => {
       expect(response.body?.type).toBe('text/plain');
     });
 
@@ -82,7 +82,7 @@ describe('AttachmentService', () => {
   });
 
   it('deletes an attachment', () => {
-    service.delete(12, 'attachment-id').subscribe((response) => {
+    service.deleteClaimAttachment(12, 'attachment-id').subscribe((response) => {
       expect(response).toBeNull();
     });
 
