@@ -126,6 +126,25 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	@Test
+	void committedCsvUploadRemainsDownloadable() throws Exception {
+		String userToken = accessToken("user@local.dev", "DevUser123!");
+		Long claimId = createClaim(userToken, "Committed CSV attachment");
+		String csvContent = "id,amount\n1,42\n";
+		MvcResult uploadResult = mockMvc.perform(upload(userToken, claimId,
+				new MockMultipartFile("files", "report.csv", "text/csv",
+						csvContent.getBytes(StandardCharsets.UTF_8)))
+						.param("relativePaths", "exports/report.csv"))
+				.andExpect(status().isCreated())
+				.andReturn();
+		UUID attachmentId = extractUuid(uploadResult, 0);
+
+		mockMvc.perform(get("/api/v1/claims/" + claimId + "/attachments/" + attachmentId + "/content")
+						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
+				.andExpect(status().isOk())
+				.andExpect(content().string(csvContent));
+	}
+
+	@Test
 	void uploadWithoutRelativePathsUsesOriginalFilenameAndAllowsOctetStreamWhenContentMatches() throws Exception {
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments optional relative paths");
@@ -480,38 +499,43 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	private Long changeStatus(String token, Long claimId, ClaimStatus targetStatus, Long version) throws Exception {
-		MvcResult result = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+		MvcResult statusChangeResult = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
 						.patch("/api/v1/claims/" + claimId + "/status")
 						.header(HttpHeaders.AUTHORIZATION, bearer(token))
 						.contentType(MediaType.APPLICATION_JSON)
 						.content(objectMapper.writeValueAsString(new ChangeClaimStatusRequest(targetStatus, version))))
 				.andExpect(status().isOk())
 				.andReturn();
-		return extractLong(result, "version");
+		return extractLong(statusChangeResult, "version");
 	}
 
 	private String accessToken(String email, String password) throws Exception {
-		MvcResult result = mockMvc.perform(post("/api/auth/login")
+		MvcResult authenticationResult = mockMvc.perform(post("/api/auth/login")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content(objectMapper.writeValueAsString(new LoginRequest(email, password))))
 				.andExpect(status().isOk())
 				.andReturn();
-		return objectMapper.readValue(result.getResponse().getContentAsString(), AuthTokenResponse.class).accessToken();
+		return objectMapper.readValue(
+				authenticationResult.getResponse().getContentAsString(),
+				AuthTokenResponse.class).accessToken();
 	}
 
-	private Long extractLong(MvcResult result, String fieldName) {
+	private Long extractLong(MvcResult requestResult, String fieldName) {
 		try {
-			return objectMapper.readTree(result.getResponse().getContentAsString()).get(fieldName).asLong();
+			return objectMapper.readTree(requestResult.getResponse().getContentAsString()).get(fieldName).asLong();
 		}
 		catch (Exception exception) {
 			throw new AssertionError("Could not extract " + fieldName, exception);
 		}
 	}
 
-	private UUID extractUuid(MvcResult result, int index) {
+	private UUID extractUuid(MvcResult attachmentListResult, int index) {
 		try {
-			String id = objectMapper.readTree(result.getResponse().getContentAsString()).get(index).get("id").asText();
-			return UUID.fromString(id);
+			String attachmentId = objectMapper.readTree(attachmentListResult.getResponse().getContentAsString())
+					.get(index)
+					.get("id")
+					.asText();
+			return UUID.fromString(attachmentId);
 		}
 		catch (Exception exception) {
 			throw new AssertionError("Could not extract attachment id", exception);

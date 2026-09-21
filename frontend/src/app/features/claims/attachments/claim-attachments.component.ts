@@ -69,195 +69,188 @@ export class ClaimAttachmentsComponent implements OnChanges {
 
   private readonly attachmentService = inject(AttachmentService);
   private readonly destroyRef = inject(DestroyRef);
-  private nextQueuedId = 0;
-  private listRequestId = 0;
-  private capabilitiesRequestId = 0;
+  private nextQueuedFileId = 0;
+  private attachmentListRequestId = 0;
+  private attachmentCapabilitiesRequestId = 0;
 
-  readonly attachments = signal<AttachmentResponse[]>([]);
-  readonly queuedFiles = signal<QueuedAttachmentFile[]>([]);
-  readonly capabilities = signal<AttachmentCapabilitiesResponse | null>(null);
-  readonly loading = signal(false);
-  readonly uploading = signal(false);
-  readonly dropActive = signal(false);
-  readonly batchProgress = signal<string | null>(null);
-  readonly errorMessage = signal<string | null>(null);
-  readonly deletingIds = signal<Set<string>>(new Set());
+  readonly claimAttachments = signal<AttachmentResponse[]>([]);
+  readonly queuedAttachmentFiles = signal<QueuedAttachmentFile[]>([]);
+  readonly attachmentCapabilities = signal<AttachmentCapabilitiesResponse | null>(null);
+  readonly isAttachmentListLoading = signal(false);
+  readonly isAttachmentUploadInProgress = signal(false);
+  readonly isAttachmentDropZoneActive = signal(false);
+  readonly attachmentBatchProgress = signal<string | null>(null);
+  readonly attachmentErrorMessage = signal<string | null>(null);
+  readonly attachmentIdsBeingDeleted = signal<Set<string>>(new Set());
 
   ngOnChanges(changes: SimpleChanges): void {
-    const claimChanged = 'claimId' in changes && Number.isFinite(this.claimId);
-    if (claimChanged) {
-      this.queuedFiles.set([]);
-      this.loadAttachments();
+    const hasClaimIdChanged = 'claimId' in changes && Number.isFinite(this.claimId);
+    if (hasClaimIdChanged) {
+      this.queuedAttachmentFiles.set([]);
+      this.loadClaimAttachments();
     }
-    if ((claimChanged || 'editable' in changes) && Number.isFinite(this.claimId)) {
+    if ((hasClaimIdChanged || 'editable' in changes) && Number.isFinite(this.claimId)) {
       if (this.editable) {
-        this.loadCapabilities();
+        this.loadAttachmentCapabilities();
       }
       else {
-        this.capabilities.set(null);
+        this.attachmentCapabilities.set(null);
       }
     }
   }
 
-  loadAttachments(): void {
+  loadClaimAttachments(): void {
     if (!Number.isFinite(this.claimId)) {
       return;
     }
 
-    const requestId = ++this.listRequestId;
-    this.loading.set(true);
-    this.errorMessage.set(null);
+    const attachmentListRequestId = ++this.attachmentListRequestId;
+    this.isAttachmentListLoading.set(true);
+    this.attachmentErrorMessage.set(null);
 
-    this.attachmentService.list(this.claimId)
+    this.attachmentService.loadClaimAttachments(this.claimId)
       .pipe(
         finalize(() => {
-          if (requestId === this.listRequestId) {
-            this.loading.set(false);
+          if (attachmentListRequestId === this.attachmentListRequestId) {
+            this.isAttachmentListLoading.set(false);
           }
         }),
         takeUntilDestroyed(this.destroyRef)
       )
       .subscribe({
-        next: (attachments) => {
-          if (requestId === this.listRequestId) {
-            this.attachments.set(attachments);
+        next: (claimAttachments) => {
+          if (attachmentListRequestId === this.attachmentListRequestId) {
+            this.claimAttachments.set(claimAttachments);
           }
         },
         error: (error: unknown) => {
-          if (requestId === this.listRequestId) {
-            this.errorMessage.set(this.apiErrorMessage(error, 'No se han podido cargar los adjuntos.'));
+          if (attachmentListRequestId === this.attachmentListRequestId) {
+            this.attachmentErrorMessage.set(this.apiErrorMessage(error, 'No se han podido cargar los adjuntos.'));
           }
         }
       });
   }
 
-  loadCapabilities(): void {
+  loadAttachmentCapabilities(): void {
     if (!Number.isFinite(this.claimId)) {
       return;
     }
 
-    const requestId = ++this.capabilitiesRequestId;
-    this.attachmentService.capabilities(this.claimId)
+    const attachmentCapabilitiesRequestId = ++this.attachmentCapabilitiesRequestId;
+    this.attachmentService.loadAttachmentCapabilities(this.claimId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (capabilities) => {
-          if (requestId === this.capabilitiesRequestId) {
-            this.capabilities.set(capabilities);
+        next: (attachmentCapabilities) => {
+          if (attachmentCapabilitiesRequestId === this.attachmentCapabilitiesRequestId) {
+            this.attachmentCapabilities.set(attachmentCapabilities);
           }
         },
         error: (error: unknown) => {
-          if (requestId === this.capabilitiesRequestId) {
-            this.capabilities.set(null);
-            this.errorMessage.set(this.apiErrorMessage(error, 'No se han podido cargar los limites de adjuntos.'));
+          if (attachmentCapabilitiesRequestId === this.attachmentCapabilitiesRequestId) {
+            this.attachmentCapabilities.set(null);
+            this.attachmentErrorMessage.set(this.apiErrorMessage(error, 'No se han podido cargar los limites de adjuntos.'));
           }
         }
       });
   }
 
-  selectFiles(event: Event): void {
-    this.addFilesFromEvent(event);
+  selectAttachmentFiles(event: Event): void {
+    this.addAttachmentFilesFromInputEvent(event);
   }
 
-  selectFolder(event: Event): void {
-    this.addFilesFromEvent(event);
+  selectAttachmentFolder(event: Event): void {
+    this.addAttachmentFilesFromInputEvent(event);
   }
 
-  onDragOver(event: DragEvent): void {
+  handleAttachmentDragOver(event: DragEvent): void {
     event.preventDefault();
     if (this.editable) {
-      this.dropActive.set(true);
+      this.isAttachmentDropZoneActive.set(true);
     }
   }
 
-  onDragLeave(event: DragEvent): void {
+  handleAttachmentDragLeave(event: DragEvent): void {
     if (event.currentTarget === event.target) {
-      this.dropActive.set(false);
+      this.isAttachmentDropZoneActive.set(false);
     }
   }
 
-  onDrop(event: DragEvent): void {
+  handleAttachmentDrop(event: DragEvent): void {
     event.preventDefault();
-    this.dropActive.set(false);
+    this.isAttachmentDropZoneActive.set(false);
     if (!this.editable) {
       return;
     }
-    void this.addFilesFromDataTransfer(event.dataTransfer ?? null);
+    void this.addAttachmentFilesFromDataTransfer(event.dataTransfer ?? null);
   }
 
-  removeQueuedFile(fileId: number): void {
-    this.queuedFiles.update((files) => files.filter((file) => file.id !== fileId || file.status === 'uploading'));
+  removeQueuedAttachmentFile(fileId: number): void {
+    this.queuedAttachmentFiles.update((queuedFiles) =>
+      queuedFiles.filter((queuedFile) => queuedFile.id !== fileId || queuedFile.status === 'uploading'));
   }
 
-  async uploadQueuedFiles(): Promise<void> {
-    const capabilities = this.capabilities();
-    if (!this.canStartUpload() || capabilities === null) {
+  async uploadQueuedAttachmentFiles(): Promise<void> {
+    const attachmentCapabilities = this.attachmentCapabilities();
+    if (!this.canStartAttachmentUpload() || attachmentCapabilities === null) {
       return;
     }
 
-    const uploadableFiles = this.queuedFiles().filter((file) => file.status === 'pending' || file.status === 'error');
-    const batches = this.createUploadBatches(uploadableFiles, capabilities);
+    const uploadableAttachmentFiles = this.queuedAttachmentFiles()
+      .filter((queuedFile) => queuedFile.status === 'pending' || queuedFile.status === 'error');
+    const uploadBatches = this.createAttachmentUploadBatches(uploadableAttachmentFiles, attachmentCapabilities);
 
-    this.uploading.set(true);
-    this.batchProgress.set(null);
-    this.errorMessage.set(null);
+    this.isAttachmentUploadInProgress.set(true);
+    this.attachmentBatchProgress.set(null);
+    this.attachmentErrorMessage.set(null);
 
     try {
-      for (let index = 0; index < batches.length; index++) {
-        const batch = batches[index];
-        const batchLabel = `Lote ${index + 1}/${batches.length}`;
-        const uploadIds = new Set(batch.map((file) => file.id));
-        const request: AttachmentUploadItem[] = batch.map((file) => ({
-          file: file.file,
-          relativePath: file.relativePath
+      for (let index = 0; index < uploadBatches.length; index++) {
+        const uploadBatch = uploadBatches[index];
+        const uploadBatchLabel = `Lote ${index + 1}/${uploadBatches.length}`;
+        const uploadingFileIds = new Set(uploadBatch.map((queuedFile) => queuedFile.id));
+        const uploadItems: AttachmentUploadItem[] = uploadBatch.map((queuedFile) => ({
+          file: queuedFile.file,
+          relativePath: queuedFile.relativePath
         }));
 
-        this.batchProgress.set(`${batchLabel}: ${batch.length} archivos`);
-        this.queuedFiles.update((files) => files.map((file) => uploadIds.has(file.id)
-          ? { ...file, status: 'uploading', errorMessage: null }
-          : file
-        ));
+        this.attachmentBatchProgress.set(`${uploadBatchLabel}: ${uploadBatch.length} archivos`);
+        this.updateQueuedAttachmentFileStatuses(uploadingFileIds, 'uploading', null);
 
         try {
-          await firstValueFrom(this.attachmentService.upload(this.claimId, request)
+          await firstValueFrom(this.attachmentService.uploadClaimAttachments(this.claimId, uploadItems)
             .pipe(takeUntilDestroyed(this.destroyRef)));
         }
         catch (error: unknown) {
-          const message = `${batchLabel}: ${this.apiErrorMessage(error, 'No se han podido subir los adjuntos.')}`;
-          this.errorMessage.set(message);
-          this.queuedFiles.update((files) => files.map((file) => uploadIds.has(file.id)
-            ? { ...file, status: 'error', errorMessage: message }
-            : file
-          ));
+          const message = `${uploadBatchLabel}: ${this.apiErrorMessage(error, 'No se han podido subir los adjuntos.')}`;
+          this.attachmentErrorMessage.set(message);
+          this.updateQueuedAttachmentFileStatuses(uploadingFileIds, 'error', message);
           return;
         }
 
-        this.queuedFiles.update((files) => files.map((file) => uploadIds.has(file.id)
-          ? { ...file, status: 'success', errorMessage: null }
-          : file
-        ));
+        this.updateQueuedAttachmentFileStatuses(uploadingFileIds, 'success', null);
       }
-      this.loadAttachments();
+      this.loadClaimAttachments();
     }
     finally {
-      this.batchProgress.set(null);
-      this.uploading.set(false);
+      this.attachmentBatchProgress.set(null);
+      this.isAttachmentUploadInProgress.set(false);
     }
   }
 
-  downloadAttachment(attachment: AttachmentResponse): void {
-    this.errorMessage.set(null);
-    this.attachmentService.download(this.claimId, attachment.id)
+  downloadClaimAttachment(attachment: AttachmentResponse): void {
+    this.attachmentErrorMessage.set(null);
+    this.attachmentService.downloadClaimAttachment(this.claimId, attachment.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (response) => this.saveBlob(response, attachment.fileName),
+        next: (attachmentResponse) => this.saveAttachmentDownload(attachmentResponse, attachment.fileName),
         error: (error: unknown) => {
-          this.errorMessage.set(this.apiErrorMessage(error, 'No se ha podido descargar el adjunto.'));
+          this.attachmentErrorMessage.set(this.apiErrorMessage(error, 'No se ha podido descargar el adjunto.'));
         }
       });
   }
 
-  deleteAttachment(attachment: AttachmentResponse): void {
-    if (!this.editable || this.isDeleting(attachment.id)) {
+  deleteClaimAttachment(attachment: AttachmentResponse): void {
+    if (!this.editable || this.isAttachmentBeingDeleted(attachment.id)) {
       return;
     }
 
@@ -265,38 +258,39 @@ export class ClaimAttachmentsComponent implements OnChanges {
       return;
     }
 
-    this.errorMessage.set(null);
-    this.deletingIds.update((ids) => new Set(ids).add(attachment.id));
+    this.attachmentErrorMessage.set(null);
+    this.attachmentIdsBeingDeleted.update((attachmentIds) => new Set(attachmentIds).add(attachment.id));
 
-    this.attachmentService.delete(this.claimId, attachment.id)
+    this.attachmentService.deleteClaimAttachment(this.claimId, attachment.id)
       .pipe(
         finalize(() => {
-          this.deletingIds.update((ids) => {
-            const next = new Set(ids);
-            next.delete(attachment.id);
-            return next;
+          this.attachmentIdsBeingDeleted.update((attachmentIds) => {
+            const remainingAttachmentIds = new Set(attachmentIds);
+            remainingAttachmentIds.delete(attachment.id);
+            return remainingAttachmentIds;
           });
         }),
         takeUntilDestroyed(this.destroyRef)
       )
       .subscribe({
-        next: () => this.loadAttachments(),
+        next: () => this.loadClaimAttachments(),
         error: (error: unknown) => {
-          this.errorMessage.set(this.apiErrorMessage(error, 'No se ha podido eliminar el adjunto.'));
+          this.attachmentErrorMessage.set(this.apiErrorMessage(error, 'No se ha podido eliminar el adjunto.'));
         }
       });
   }
 
-  canStartUpload(): boolean {
+  canStartAttachmentUpload(): boolean {
     return this.editable
-      && !this.uploading()
-      && this.capabilities() !== null
-      && this.queueLimitMessage() === null
-      && this.queuedFiles().some((file) => file.status === 'pending' || file.status === 'error');
+      && !this.isAttachmentUploadInProgress()
+      && this.attachmentCapabilities() !== null
+      && this.attachmentQueueLimitMessage() === null
+      && this.queuedAttachmentFiles().some((queuedFile) =>
+        queuedFile.status === 'pending' || queuedFile.status === 'error');
   }
 
-  isDeleting(attachmentId: string): boolean {
-    return this.deletingIds().has(attachmentId);
+  isAttachmentBeingDeleted(attachmentId: string): boolean {
+    return this.attachmentIdsBeingDeleted().has(attachmentId);
   }
 
   trackAttachment(_index: number, attachment: AttachmentResponse): string {
@@ -317,34 +311,37 @@ export class ClaimAttachmentsComponent implements OnChanges {
     return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  queueSummary(): string {
-    const files = this.queuedFiles();
-    const totalSizeBytes = files.reduce((total, file) => total + file.sizeBytes, 0);
-    return `${files.length} archivos - ${this.formatBytes(totalSizeBytes)}`;
+  attachmentQueueSummary(): string {
+    const queuedAttachmentFiles = this.queuedAttachmentFiles();
+    const totalSizeBytes = queuedAttachmentFiles.reduce(
+      (accumulatedSizeBytes, queuedFile) => accumulatedSizeBytes + queuedFile.sizeBytes,
+      0
+    );
+    return `${queuedAttachmentFiles.length} archivos - ${this.formatBytes(totalSizeBytes)}`;
   }
 
-  queueLimitMessage(): string | null {
-    const capabilities = this.capabilities();
-    if (capabilities === null) {
+  attachmentQueueLimitMessage(): string | null {
+    const attachmentCapabilities = this.attachmentCapabilities();
+    if (attachmentCapabilities === null) {
       return null;
     }
 
-    const oversizedFile = this.queuedFiles()
-      .find((file) => file.sizeBytes > capabilities.maxFileSizeBytes);
+    const oversizedFile = this.queuedAttachmentFiles()
+      .find((queuedFile) => queuedFile.sizeBytes > attachmentCapabilities.maxFileSizeBytes);
     if (oversizedFile !== undefined) {
-      return `"${oversizedFile.relativePath}" supera el limite por archivo (${this.formatBytes(capabilities.maxFileSizeBytes)}).`;
+      return `"${oversizedFile.relativePath}" supera el limite por archivo (${this.formatBytes(attachmentCapabilities.maxFileSizeBytes)}).`;
     }
 
-    const requestOversizedFile = this.queuedFiles()
-      .find((file) => file.sizeBytes > capabilities.maxRequestSizeBytes);
+    const requestOversizedFile = this.queuedAttachmentFiles()
+      .find((queuedFile) => queuedFile.sizeBytes > attachmentCapabilities.maxRequestSizeBytes);
     if (requestOversizedFile !== undefined) {
-      return `"${requestOversizedFile.relativePath}" supera el limite por lote (${this.formatBytes(capabilities.maxRequestSizeBytes)}).`;
+      return `"${requestOversizedFile.relativePath}" supera el limite por lote (${this.formatBytes(attachmentCapabilities.maxRequestSizeBytes)}).`;
     }
 
     return null;
   }
 
-  statusLabel(status: QueuedAttachmentStatus): string {
+  queuedAttachmentStatusLabel(status: QueuedAttachmentStatus): string {
     switch (status) {
       case 'pending':
         return 'Pendiente';
@@ -357,92 +354,108 @@ export class ClaimAttachmentsComponent implements OnChanges {
     }
   }
 
-  statusClass(status: QueuedAttachmentStatus): string {
+  queuedAttachmentStatusClass(status: QueuedAttachmentStatus): string {
     return `attachment-status attachment-status-${status}`;
   }
 
-  private addFilesFromEvent(event: Event): void {
+  private addAttachmentFilesFromInputEvent(event: Event): void {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) {
       return;
     }
 
-    this.addSelectedFiles(this.filesFromFileList(target.files));
+    this.addSelectedAttachmentFiles(this.attachmentFilesFromFileList(target.files));
     target.value = '';
   }
 
-  private async addFilesFromDataTransfer(dataTransfer: DataTransfer | null): Promise<void> {
+  private updateQueuedAttachmentFileStatuses(
+    attachmentFileIds: ReadonlySet<number>,
+    status: QueuedAttachmentStatus,
+    errorMessage: string | null
+  ): void {
+    this.queuedAttachmentFiles.update((queuedFiles) => queuedFiles.map((queuedFile) =>
+      attachmentFileIds.has(queuedFile.id)
+        ? { ...queuedFile, status, errorMessage }
+        : queuedFile
+    ));
+  }
+
+  private async addAttachmentFilesFromDataTransfer(dataTransfer: DataTransfer | null): Promise<void> {
     try {
-      this.addSelectedFiles(await this.filesFromDataTransfer(dataTransfer));
+      this.addSelectedAttachmentFiles(await this.attachmentFilesFromDataTransfer(dataTransfer));
     }
     catch (error: unknown) {
       const message = error instanceof Error && error.message.trim().length > 0
         ? error.message
         : 'No se ha podido leer la carpeta seleccionada.';
-      this.errorMessage.set(message);
+      this.attachmentErrorMessage.set(message);
     }
   }
 
-  private addSelectedFiles(files: SelectedAttachmentFile[]): void {
-    if (files.length === 0) {
+  private addSelectedAttachmentFiles(selectedAttachmentFiles: SelectedAttachmentFile[]): void {
+    if (selectedAttachmentFiles.length === 0) {
       return;
     }
 
-    const queuedFiles = files.map((file) => this.toQueuedFile(file));
-    this.errorMessage.set(null);
-    this.queuedFiles.update((current) => [...current, ...queuedFiles]);
+    const newlyQueuedFiles = selectedAttachmentFiles.map((selectedFile) => this.toQueuedAttachmentFile(selectedFile));
+    this.attachmentErrorMessage.set(null);
+    this.queuedAttachmentFiles.update((currentQueue) => [...currentQueue, ...newlyQueuedFiles]);
   }
 
-  private toQueuedFile(selected: SelectedAttachmentFile): QueuedAttachmentFile {
+  private toQueuedAttachmentFile(selectedFile: SelectedAttachmentFile): QueuedAttachmentFile {
     return {
-      id: ++this.nextQueuedId,
-      file: selected.file,
-      name: selected.file.name,
-      relativePath: selected.relativePath,
-      sizeBytes: selected.file.size,
-      contentType: selected.file.type || DEFAULT_CONTENT_TYPE,
+      id: ++this.nextQueuedFileId,
+      file: selectedFile.file,
+      name: selectedFile.file.name,
+      relativePath: selectedFile.relativePath,
+      sizeBytes: selectedFile.file.size,
+      contentType: selectedFile.file.type || DEFAULT_CONTENT_TYPE,
       status: 'pending',
       errorMessage: null
     };
   }
 
-  private filesFromFileList(fileList: FileList | null): SelectedAttachmentFile[] {
+  private attachmentFilesFromFileList(fileList: FileList | null): SelectedAttachmentFile[] {
     return Array.from(fileList ?? []).map((file) => ({
       file,
       relativePath: this.relativePathFor(file)
     }));
   }
 
-  private async filesFromDataTransfer(dataTransfer: DataTransfer | null): Promise<SelectedAttachmentFile[]> {
+  private async attachmentFilesFromDataTransfer(dataTransfer: DataTransfer | null): Promise<SelectedAttachmentFile[]> {
     if (dataTransfer === null) {
       return [];
     }
 
-    const itemFiles = await this.filesFromDataTransferItems(dataTransfer.items);
-    return itemFiles.length > 0 ? itemFiles : this.filesFromFileList(dataTransfer.files);
+    const transferredItemFiles = await this.attachmentFilesFromDataTransferItems(dataTransfer.items);
+    return transferredItemFiles.length > 0
+      ? transferredItemFiles
+      : this.attachmentFilesFromFileList(dataTransfer.files);
   }
 
-  private async filesFromDataTransferItems(items: DataTransferItemList | null): Promise<SelectedAttachmentFile[]> {
+  private async attachmentFilesFromDataTransferItems(
+    dataTransferItems: DataTransferItemList | null
+  ): Promise<SelectedAttachmentFile[]> {
     const selectedFiles: SelectedAttachmentFile[] = [];
-    for (const item of Array.from(items ?? [])) {
-      if (item.kind !== 'file') {
+    for (const dataTransferItem of Array.from(dataTransferItems ?? [])) {
+      if (dataTransferItem.kind !== 'file') {
         continue;
       }
 
-      const entry = item.webkitGetAsEntry?.() as FileSystemEntryLike | null | undefined;
-      if (entry !== undefined && entry !== null) {
-        selectedFiles.push(...await this.filesFromEntry(entry, entry.name, 0));
+      const fileSystemEntry = dataTransferItem.webkitGetAsEntry?.() as FileSystemEntryLike | null | undefined;
+      if (fileSystemEntry !== undefined && fileSystemEntry !== null) {
+        selectedFiles.push(...await this.attachmentFilesFromEntry(fileSystemEntry, fileSystemEntry.name, 0));
         continue;
       }
 
-      const fileSystemItem = item as DataTransferItemWithFileSystemHandle;
-      const handle = await fileSystemItem.getAsFileSystemHandle?.();
-      if (handle !== undefined) {
-        selectedFiles.push(...await this.filesFromHandle(handle, handle.name, 0));
+      const fileSystemItem = dataTransferItem as DataTransferItemWithFileSystemHandle;
+      const fileSystemHandle = await fileSystemItem.getAsFileSystemHandle?.();
+      if (fileSystemHandle !== undefined) {
+        selectedFiles.push(...await this.attachmentFilesFromHandle(fileSystemHandle, fileSystemHandle.name, 0));
         continue;
       }
 
-      const file = item.getAsFile();
+      const file = dataTransferItem.getAsFile();
       if (file !== null) {
         selectedFiles.push({ file, relativePath: this.relativePathFor(file) });
       }
@@ -450,142 +463,160 @@ export class ClaimAttachmentsComponent implements OnChanges {
     return selectedFiles;
   }
 
-  private async filesFromEntry(entry: FileSystemEntryLike, relativePath: string, depth: number): Promise<SelectedAttachmentFile[]> {
-    this.assertDirectoryDepth(depth);
-    const normalizedPath = this.normalizeRelativePath(relativePath || entry.name);
+  private async attachmentFilesFromEntry(
+    fileSystemEntry: FileSystemEntryLike,
+    relativePath: string,
+    directoryDepth: number
+  ): Promise<SelectedAttachmentFile[]> {
+    this.ensureDirectoryDepthIsAllowed(directoryDepth);
+    const normalizedPath = this.normalizeRelativePath(relativePath || fileSystemEntry.name);
 
-    if (entry.isFile) {
-      if (entry.file === undefined) {
+    if (fileSystemEntry.isFile) {
+      if (fileSystemEntry.file === undefined) {
         return [];
       }
       const file = await new Promise<File>((resolve, reject) => {
-        entry.file?.(resolve, reject);
+        fileSystemEntry.file?.(resolve, reject);
       });
       return [{ file, relativePath: normalizedPath || file.name }];
     }
 
-    if (!entry.isDirectory || entry.createReader === undefined) {
+    if (!fileSystemEntry.isDirectory || fileSystemEntry.createReader === undefined) {
       return [];
     }
 
-    const children = await this.readAllDirectoryEntries(entry.createReader());
-    const files: SelectedAttachmentFile[] = [];
-    for (const child of children) {
-      files.push(...await this.filesFromEntry(child, `${normalizedPath}/${child.name}`, depth + 1));
+    const childEntries = await this.readAllDirectoryEntries(fileSystemEntry.createReader());
+    const selectedFiles: SelectedAttachmentFile[] = [];
+    for (const childEntry of childEntries) {
+      selectedFiles.push(...await this.attachmentFilesFromEntry(
+        childEntry,
+        `${normalizedPath}/${childEntry.name}`,
+        directoryDepth + 1
+      ));
     }
-    return files;
+    return selectedFiles;
   }
 
-  private async readAllDirectoryEntries(reader: FileSystemDirectoryReaderLike): Promise<FileSystemEntryLike[]> {
-    const entries: FileSystemEntryLike[] = [];
+  private async readAllDirectoryEntries(directoryReader: FileSystemDirectoryReaderLike): Promise<FileSystemEntryLike[]> {
+    const allDirectoryEntries: FileSystemEntryLike[] = [];
     while (true) {
-      const chunk = await new Promise<FileSystemEntryLike[]>((resolve, reject) => {
-        reader.readEntries(resolve, reject);
+      const directoryEntries = await new Promise<FileSystemEntryLike[]>((resolve, reject) => {
+        directoryReader.readEntries(resolve, reject);
       });
-      if (chunk.length === 0) {
-        return entries;
+      if (directoryEntries.length === 0) {
+        return allDirectoryEntries;
       }
-      entries.push(...chunk);
+      allDirectoryEntries.push(...directoryEntries);
     }
   }
 
-  private async filesFromHandle(handle: FileSystemHandleLike, relativePath: string, depth: number): Promise<SelectedAttachmentFile[]> {
-    this.assertDirectoryDepth(depth);
-    const normalizedPath = this.normalizeRelativePath(relativePath || handle.name);
+  private async attachmentFilesFromHandle(
+    fileSystemHandle: FileSystemHandleLike,
+    relativePath: string,
+    directoryDepth: number
+  ): Promise<SelectedAttachmentFile[]> {
+    this.ensureDirectoryDepthIsAllowed(directoryDepth);
+    const normalizedPath = this.normalizeRelativePath(relativePath || fileSystemHandle.name);
 
-    if (handle.kind === 'file') {
-      if (handle.getFile === undefined) {
+    if (fileSystemHandle.kind === 'file') {
+      if (fileSystemHandle.getFile === undefined) {
         return [];
       }
-      const file = await handle.getFile();
+      const file = await fileSystemHandle.getFile();
       return [{ file, relativePath: normalizedPath || file.name }];
     }
 
-    if (handle.kind !== 'directory' || handle.values === undefined) {
+    if (fileSystemHandle.kind !== 'directory' || fileSystemHandle.values === undefined) {
       return [];
     }
 
-    const files: SelectedAttachmentFile[] = [];
-    for await (const child of handle.values()) {
-      files.push(...await this.filesFromHandle(child, `${normalizedPath}/${child.name}`, depth + 1));
+    const selectedFiles: SelectedAttachmentFile[] = [];
+    for await (const childHandle of fileSystemHandle.values()) {
+      selectedFiles.push(...await this.attachmentFilesFromHandle(
+        childHandle,
+        `${normalizedPath}/${childHandle.name}`,
+        directoryDepth + 1
+      ));
     }
-    return files;
+    return selectedFiles;
   }
 
-  private assertDirectoryDepth(depth: number): void {
-    if (depth > MAX_DIRECTORY_DEPTH) {
+  private ensureDirectoryDepthIsAllowed(directoryDepth: number): void {
+    if (directoryDepth > MAX_DIRECTORY_DEPTH) {
       throw new Error('La carpeta tiene demasiados niveles para adjuntarse de forma segura.');
     }
   }
 
   private relativePathFor(file: File): string {
     const pathCarrier = file as File & { webkitRelativePath?: string; relativePath?: string };
-    const submittedPath = pathCarrier.webkitRelativePath || pathCarrier.relativePath || file.name;
-    return this.normalizeRelativePath(submittedPath);
+    const submittedRelativePath = pathCarrier.webkitRelativePath || pathCarrier.relativePath || file.name;
+    return this.normalizeRelativePath(submittedRelativePath);
   }
 
   private normalizeRelativePath(path: string): string {
     return path.replace(/\\/g, '/').replace(/^\/+/, '');
   }
 
-  private createUploadBatches(
-    files: QueuedAttachmentFile[],
-    capabilities: AttachmentCapabilitiesResponse
+  private createAttachmentUploadBatches(
+    queuedFiles: QueuedAttachmentFile[],
+    attachmentCapabilities: AttachmentCapabilitiesResponse
   ): QueuedAttachmentFile[][] {
-    const maxFilesPerRequest = Math.max(1, capabilities.maxFilesPerRequest);
-    const maxRequestSizeBytes = Math.max(1, capabilities.maxRequestSizeBytes);
-    const batches: QueuedAttachmentFile[][] = [];
+    const maxFilesPerRequest = Math.max(1, attachmentCapabilities.maxFilesPerRequest);
+    const maxRequestSizeBytes = Math.max(1, attachmentCapabilities.maxRequestSizeBytes);
+    const uploadBatches: QueuedAttachmentFile[][] = [];
     let currentBatch: QueuedAttachmentFile[] = [];
     let currentBatchSizeBytes = 0;
 
-    for (const file of files) {
+    for (const queuedFile of queuedFiles) {
       const nextBatchTooLarge = currentBatch.length > 0
-        && currentBatchSizeBytes + file.sizeBytes > maxRequestSizeBytes;
+        && currentBatchSizeBytes + queuedFile.sizeBytes > maxRequestSizeBytes;
       if (currentBatch.length >= maxFilesPerRequest || nextBatchTooLarge) {
-        batches.push(currentBatch);
+        uploadBatches.push(currentBatch);
         currentBatch = [];
         currentBatchSizeBytes = 0;
       }
-      currentBatch.push(file);
-      currentBatchSizeBytes += file.sizeBytes;
+      currentBatch.push(queuedFile);
+      currentBatchSizeBytes += queuedFile.sizeBytes;
     }
 
     if (currentBatch.length > 0) {
-      batches.push(currentBatch);
+      uploadBatches.push(currentBatch);
     }
 
-    return batches;
+    return uploadBatches;
   }
 
-  private saveBlob(response: HttpResponse<Blob>, fallbackFileName: string): void {
-    const blob = response.body ?? new Blob();
+  private saveAttachmentDownload(attachmentResponse: HttpResponse<Blob>, fallbackFileName: string): void {
+    const blob = attachmentResponse.body ?? new Blob();
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = objectUrl;
-    anchor.download = this.fileNameFromDisposition(response.headers.get('content-disposition')) ?? fallbackFileName;
+    anchor.download = this.attachmentFileNameFromContentDisposition(
+      attachmentResponse.headers.get('content-disposition')
+    ) ?? fallbackFileName;
     anchor.rel = 'noopener';
     anchor.click();
     URL.revokeObjectURL(objectUrl);
   }
 
-  private fileNameFromDisposition(disposition: string | null): string | null {
+  private attachmentFileNameFromContentDisposition(disposition: string | null): string | null {
     if (disposition === null) {
       return null;
     }
 
-    const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
-    if (encoded?.[1]) {
+    const encodedFileNameMatch = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+    if (encodedFileNameMatch?.[1]) {
       try {
-        return decodeURIComponent(encoded[1].trim());
+        return decodeURIComponent(encodedFileNameMatch[1].trim());
       }
       catch {
-        return encoded[1].trim();
+        return encodedFileNameMatch[1].trim();
       }
     }
 
-    const quoted = /filename="([^"]+)"/i.exec(disposition);
-    if (quoted?.[1]) {
-      return quoted[1].trim();
+    const quotedFileNameMatch = /filename="([^"]+)"/i.exec(disposition);
+    if (quotedFileNameMatch?.[1]) {
+      return quotedFileNameMatch[1].trim();
     }
 
     return null;
@@ -596,12 +627,12 @@ export class ClaimAttachmentsComponent implements OnChanges {
       return fallback;
     }
 
-    const base = this.statusMessage(error.status) ?? fallback;
+    const base = this.attachmentErrorStatusMessage(error.status) ?? fallback;
     const detail = this.apiErrorDetail(error);
     return detail ? `${base} ${detail}` : base;
   }
 
-  private statusMessage(status: number): string | null {
+  private attachmentErrorStatusMessage(status: number): string | null {
     switch (status) {
       case 400:
         return 'La solicitud de adjuntos no es valida.';
@@ -633,14 +664,14 @@ export class ClaimAttachmentsComponent implements OnChanges {
       ?? this.apiTextProperty(body, 'code');
   }
 
-  private apiTextProperty(value: unknown, property: ApiTextProperty): string | null {
-    if (typeof value !== 'object' || value === null || !(property in value)) {
+  private apiTextProperty(apiPayload: unknown, property: ApiTextProperty): string | null {
+    if (typeof apiPayload !== 'object' || apiPayload === null || !(property in apiPayload)) {
       return null;
     }
 
-    const candidate = value as Record<ApiTextProperty, unknown>;
-    return typeof candidate[property] === 'string' && candidate[property].trim().length > 0
-      ? candidate[property].trim()
+    const apiPayloadProperties = apiPayload as Record<ApiTextProperty, unknown>;
+    return typeof apiPayloadProperties[property] === 'string' && apiPayloadProperties[property].trim().length > 0
+      ? apiPayloadProperties[property].trim()
       : null;
   }
 }

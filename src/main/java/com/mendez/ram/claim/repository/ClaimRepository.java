@@ -17,14 +17,14 @@ import org.springframework.data.repository.query.Param;
 public interface ClaimRepository extends JpaRepository<Claim, Long>, JpaSpecificationExecutor<Claim> {
 
 	@Override
-	@EntityGraph(attributePaths = { "createdBy", "updatedBy" })
+	@EntityGraph(attributePaths = { "createdBy", "updatedBy", "assignedTo" })
 	Page<Claim> findAll(Specification<Claim> specification, Pageable pageable);
 
-	@EntityGraph(attributePaths = { "createdBy", "updatedBy" })
+	@EntityGraph(attributePaths = { "createdBy", "updatedBy", "assignedTo" })
 	Optional<Claim> findWithUsersById(Long id);
 
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
-	@EntityGraph(attributePaths = { "createdBy", "updatedBy" })
+	@EntityGraph(attributePaths = { "createdBy", "updatedBy", "assignedTo" })
 	@Query("select claim from Claim claim where claim.id = :id")
 	Optional<Claim> findLockedWithUsersById(@Param("id") Long id);
 }

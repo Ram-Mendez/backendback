@@ -60,6 +60,7 @@ describe('ClaimsComponent', () => {
   });
 
   afterEach(() => {
+    httpMock.match((request) => /\/(comments|history|reviewers)$/.test(request.url)).forEach((request) => request.flush([]));
     httpMock.verify({ ignoreCancelled: true });
   });
 
@@ -230,6 +231,47 @@ describe('ClaimsComponent', () => {
     expect(queryElement('.drawer')).toBeNull();
     expect(component.selectedClaimDetail()).toBeNull();
     expect(component.selectedClaimId()).toBeNull();
+  });
+
+  it('keeps the post-assignment history when an older history request completes later', () => {
+    expectListRequest().flush(pageResponse());
+    fixture.detectChanges();
+
+    clickFirstRow();
+    httpMock.expectOne('/api/v1/claims/12').flush(detailResponse());
+    const olderHistoryRequest = httpMock.expectOne('/api/v1/claims/12/history');
+
+    component.selectedAssigneeControl.setValue(2);
+    component.assignSelectedClaim();
+    const assignmentRequest = httpMock.expectOne('/api/v1/claims/12/assignment');
+    expect(assignmentRequest.request.method).toBe('PATCH');
+    assignmentRequest.flush({
+      ...detailResponse(),
+      assignedToId: 2,
+      assignedToUsername: 'manager',
+      version: 5
+    });
+
+    expectListRequest().flush(pageResponse());
+    const refreshedHistoryRequest = httpMock.expectOne('/api/v1/claims/12/history');
+    refreshedHistoryRequest.flush([{
+      id: 2,
+      eventType: 'ASSIGNED',
+      eventData: null,
+      actorId: 1,
+      actorUsername: 'dev-admin',
+      occurredAt: '2026-09-03T09:20:00Z'
+    }]);
+    olderHistoryRequest.flush([{
+      id: 1,
+      eventType: 'CREATED',
+      eventData: null,
+      actorId: 1,
+      actorUsername: 'dev-admin',
+      occurredAt: '2026-09-03T08:00:00Z'
+    }]);
+
+    expect(component.claimHistoryEntries().map((entry) => entry.eventType)).toEqual(['ASSIGNED']);
   });
 
   function expectListRequest(): TestRequest {

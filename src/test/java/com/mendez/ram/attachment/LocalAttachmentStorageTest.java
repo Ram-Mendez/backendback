@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -46,6 +48,34 @@ class LocalAttachmentStorageTest {
 		assertThatThrownBy(() -> storage.store(new StoreAttachmentCommand("../escape.txt",
 				new ByteArrayInputStream("escape".getBytes(StandardCharsets.UTF_8)))))
 				.isInstanceOf(ApiException.class);
+	}
+
+	@Test
+	void removesPartiallyWrittenFileWhenInputStreamFails() {
+		LocalAttachmentStorage storage = storage();
+		byte[] partialContent = "partial".getBytes(StandardCharsets.UTF_8);
+		InputStream failingInput = new InputStream() {
+			private boolean firstRead = true;
+
+			@Override
+			public int read() throws IOException {
+				throw new IOException("forced read failure");
+			}
+
+			@Override
+			public int read(byte[] bytes, int offset, int length) throws IOException {
+				if (!firstRead) {
+					throw new IOException("forced read failure");
+				}
+				firstRead = false;
+				System.arraycopy(partialContent, 0, bytes, offset, partialContent.length);
+				return partialContent.length;
+			}
+		};
+
+		assertThatThrownBy(() -> storage.store(new StoreAttachmentCommand("claims/1/partial.txt", failingInput)))
+				.isInstanceOf(ApiException.class);
+		assertThat(Files.exists(tempDir.resolve("claims/1/partial.txt"))).isFalse();
 	}
 
 	private LocalAttachmentStorage storage() {

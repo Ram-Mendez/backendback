@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class AttachmentMapper {
 
-	public AttachmentResponse toResponse(ClaimAttachment attachment) {
+	public AttachmentResponse toAttachmentResponse(ClaimAttachment attachment) {
 		return new AttachmentResponse(
 				attachment.getId(),
 				attachment.getFileName(),
