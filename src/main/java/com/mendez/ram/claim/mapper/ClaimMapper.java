@@ -30,7 +30,7 @@ public class ClaimMapper {
 				trimRequiredText(request.title()),
 				trimRequiredText(request.description()),
 				trimOptionalTextToNull(request.claimantName()),
-				request.priority() == null ? claim.getPriority() : request.priority(),
+				request.priority() == null ? ClaimPriority.NORMAL : request.priority(),
 				request.dueAt(),
 				updatedBy,
 				updateTime);

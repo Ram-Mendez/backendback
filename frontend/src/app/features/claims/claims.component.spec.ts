@@ -73,6 +73,64 @@ describe('ClaimsComponent', () => {
     expect(buttonWithText('Buscar')).toBeNull();
   });
 
+  it('renders each claim property under its matching table column', () => {
+    expectListRequest().flush(pageResponse({
+      content: [
+        summaryResponse({
+          title: 'Contrato con responsable',
+          status: 'UNDER_REVIEW',
+          priority: 'HIGH',
+          assignedToId: 2,
+          assignedToUsername: 'dev-manager',
+          createdByUsername: 'dev-admin',
+          createdAt: '2026-09-03T12:00:00Z'
+        }),
+        summaryResponse({
+          id: 13,
+          reference: 'CLM-2026-000002',
+          title: 'Contrato sin responsable',
+          status: 'REGISTERED',
+          priority: undefined,
+          assignedToId: null,
+          assignedToUsername: null,
+          createdById: 3,
+          createdByUsername: 'claim-creator',
+          createdAt: '2026-09-04T12:00:00Z'
+        })
+      ],
+      totalElements: 2
+    }));
+    fixture.detectChanges();
+
+    const headers = tableHeaders();
+    const rows = claimTableRows();
+
+    expect(headers).toEqual([
+      'Referencia',
+      'Título',
+      'Estado',
+      'Prioridad',
+      'Responsable',
+      'Creado por',
+      'Fecha creación',
+      'Última actualización',
+      'Acciones'
+    ]);
+    expect(cellText(rows[0], headers, 'Título')).toBe('Contrato con responsable');
+    expect(cellText(rows[0], headers, 'Estado')).toContain('En revisión');
+    expect(cellText(rows[0], headers, 'Prioridad')).toBe('HIGH');
+    expect(cellText(rows[0], headers, 'Responsable')).toBe('dev-manager');
+    expect(cellText(rows[0], headers, 'Creado por')).toContain('dev-admin');
+    expect(cellText(rows[0], headers, 'Fecha creación')).toContain('03/09/2026');
+
+    expect(cellText(rows[1], headers, 'Título')).toBe('Contrato sin responsable');
+    expect(cellText(rows[1], headers, 'Estado')).toContain('Registrada');
+    expect(cellText(rows[1], headers, 'Prioridad')).toBe('NORMAL');
+    expect(cellText(rows[1], headers, 'Responsable')).toBe('Sin asignar');
+    expect(cellText(rows[1], headers, 'Creado por')).toContain('claim-creator');
+    expect(cellText(rows[1], headers, 'Fecha creación')).toContain('04/09/2026');
+  });
+
   it('applies text filters with debounce and exact active query params', fakeAsync(() => {
     expectListRequest().flush(pageResponse());
 
@@ -312,6 +370,26 @@ describe('ClaimsComponent', () => {
     requireElement<HTMLTableRowElement>('tbody tr[role="button"]').click();
   }
 
+  function tableHeaders(): string[] {
+    return Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('table:not(.skeleton-table) thead th'))
+      .map((header) => header.textContent?.trim() ?? '');
+  }
+
+  function claimTableRows(): HTMLTableRowElement[] {
+    return Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLTableRowElement>('table:not(.skeleton-table) tbody tr')
+    );
+  }
+
+  function cellText(row: HTMLTableRowElement, headers: string[], column: string): string {
+    const columnIndex = headers.indexOf(column);
+    if (columnIndex === -1) {
+      throw new Error(`Column not found: ${column}`);
+    }
+
+    return row.cells[columnIndex]?.textContent?.trim() ?? '';
+  }
+
   function pageText(): string {
     return (fixture.nativeElement as HTMLElement).textContent ?? '';
   }
@@ -329,7 +407,7 @@ describe('ClaimsComponent', () => {
     };
   }
 
-  function summaryResponse(): ClaimSummary {
+  function summaryResponse(overrides: Partial<ClaimSummary> = {}): ClaimSummary {
     return {
       id: 12,
       reference: 'CLM-2026-000001',
@@ -338,7 +416,8 @@ describe('ClaimsComponent', () => {
       createdById: 1,
       createdByUsername: 'dev-admin',
       createdAt: '2026-09-03T08:00:00Z',
-      updatedAt: '2026-09-03T09:15:00Z'
+      updatedAt: '2026-09-03T09:15:00Z',
+      ...overrides
     };
   }
 

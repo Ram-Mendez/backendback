@@ -98,7 +98,7 @@ public class AttachmentService {
 		Claim claim = claimService.findEditableClaimWithLock(claimId, principal);
 		AuthUser actingUser = findAuthenticatedUser(principal);
 		List<String> storedStorageKeys = new ArrayList<>();
-		registerUploadRollbackCleanup(claimId, storedStorageKeys);
+		registerUploadRollbackCleanup(claimId, List.copyOf(storedStorageKeys));
 		Set<String> usedRelativePaths = claimAttachmentRepository.findByClaimIdOrderByRelativePathAscCreatedAtAsc(claimId)
 				.stream()
 				.map(ClaimAttachment::getRelativePath)
@@ -129,7 +129,7 @@ public class AttachmentService {
 	@Transactional(readOnly = true)
 	public AttachmentDownload downloadClaimAttachment(Long claimId, UUID attachmentId, AuthenticatedUser principal) {
 		claimService.findViewableClaim(claimId, principal);
-		ClaimAttachment attachment = findAttachmentByClaimAndId(claimId, attachmentId);
+		ClaimAttachment attachment = findAttachmentById(attachmentId);
 		StoredAttachmentResource storedResource = attachmentStorage.load(attachment.getStorageKey());
 		LOGGER.info("Attachment {} downloaded from claim {} by user {}", attachmentId, claimId, principal.id());
 		return new AttachmentDownload(attachment, storedResource.inputStream(), storedResource.sizeBytes());
@@ -234,6 +234,12 @@ public class AttachmentService {
 
 	private ClaimAttachment findAttachmentByClaimAndId(Long claimId, UUID attachmentId) {
 		return claimAttachmentRepository.findByIdAndClaimId(attachmentId, claimId)
+				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ATTACHMENT_NOT_FOUND",
+						"No existe el adjunto solicitado."));
+	}
+
+	private ClaimAttachment findAttachmentById(UUID attachmentId) {
+		return claimAttachmentRepository.findById(attachmentId)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ATTACHMENT_NOT_FOUND",
 						"No existe el adjunto solicitado."));
 	}

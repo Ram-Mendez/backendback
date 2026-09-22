@@ -95,7 +95,7 @@ public final class ClaimSpecifications {
 
 			return builder.lessThan(
 					root.get("createdAt"),
-					utcStartOfDay(createdTo.plusDays(1)));
+					utcStartOfDay(createdTo));
 		};
 	}
 

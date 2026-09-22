@@ -152,6 +152,8 @@
                   <td><span class="skeleton-line medium"></span></td>
                   <td><span class="skeleton-line short"></span></td>
                   <td><span class="skeleton-line short"></span></td>
+                  <td><span class="skeleton-line short"></span></td>
+                  <td><span class="skeleton-line short"></span></td>
                   <td><span class="skeleton-actions"></span></td>
                 </tr>
               }
@@ -212,8 +214,6 @@
                   <td>
                     <strong class="claim-reference">{{ claim.reference }}</strong>
                   </td>
-                  <td>{{ claim.priority ?? 'NORMAL' }}</td>
-                  <td>{{ claim.assignedToUsername ?? 'Sin asignar' }}</td>
                   <td>
                     <strong class="claim-title">{{ claim.title }}</strong>
                   </td>
@@ -223,6 +223,8 @@
                       {{ claimStatusLabel(claim.status) }}
                     </span>
                   </td>
+                  <td>{{ claim.priority ?? 'NORMAL' }}</td>
+                  <td>{{ claim.assignedToUsername ?? 'Sin asignar' }}</td>
                   <td>
                     <div class="stacked-cell">
                       <strong>{{ claim.createdByUsername }}</strong>
@@ -349,7 +351,7 @@
 
             <section class="detail-section" aria-labelledby="claimant-title">
               <h3 id="claimant-title">Reclamante</h3>
-              <p>{{ detail.claimantName ?? 'Sin reclamante' }}</p>
+              <p>{{ detail.claimantName ?? 'Sin reclamante' }}</p  >
             </section>
 
             <section class="detail-section" aria-labelledby="description-title">

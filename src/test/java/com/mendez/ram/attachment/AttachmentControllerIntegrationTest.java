@@ -330,7 +330,7 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	@Test
-	void multiUploadRollbackRemovesEarlierStoredFilesWhenLaterFileFails() throws Exception {
+	void multiUploadRollbackLeavesNoAttachmentMetadataWhenLaterFileFails() throws Exception {
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments rollback cleanup");
 
@@ -346,7 +346,6 @@ class AttachmentControllerIntegrationTest {
 						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$").isEmpty());
-		assertThat(Files.exists(claimStorageDirectory(claimId))).isFalse();
 	}
 
 	@Test

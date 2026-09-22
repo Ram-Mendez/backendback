@@ -20,7 +20,7 @@ public enum ClaimStatus {
 					|| target == REJECTED
 					|| target == PENDING_CORRECTION
 					|| target == INADMISSIBLE;
-			case PENDING_CORRECTION -> target == REGISTERED;
+			case PENDING_CORRECTION -> target == REGISTERED || target == ACCEPTED;
 			case ACCEPTED, REJECTED, INADMISSIBLE -> false;
 		};
 	}
