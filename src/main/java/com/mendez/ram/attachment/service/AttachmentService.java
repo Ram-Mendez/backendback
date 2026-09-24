@@ -102,7 +102,9 @@ public class AttachmentService {
 		AuthUser actingUser = findAuthenticatedUser(principal);
 
 		List<String> storedStorageKeys = new ArrayList<>();
-		registerUploadRollbackCleanup(claimId, List.copyOf(storedStorageKeys));
+		registerUploadRollbackCleanup(
+				claimId,
+				storedStorageKeys);
 
 		Set<String> usedRelativePaths = claimAttachmentRepository.findByClaimIdOrderByRelativePathAscCreatedAtAsc(claimId)
 				.stream()

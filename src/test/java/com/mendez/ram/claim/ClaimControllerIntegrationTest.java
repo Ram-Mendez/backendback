@@ -10,6 +10,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.OffsetDateTime;
+
 import com.mendez.ram.TestcontainersConfiguration;
 import com.mendez.ram.auth.dto.AuthTokenResponse;
 import com.mendez.ram.auth.dto.LoginRequest;
@@ -165,7 +167,7 @@ class ClaimControllerIntegrationTest {
 
 	@Test
 	void invalidTransitionReturnsConflict() throws Exception {
-		// ARRANGE — crear un borrador para probar una transición no permitida.
+		// ARRANGE — avanzar el claim hasta pendiente de corrección.
 		String adminToken = accessToken("admin@local.dev", "DevAdmin123!");
 		MvcResult createdClaimResult = createClaim(adminToken, "Invalid transition")
 				.andExpect(status().isCreated())
@@ -173,10 +175,112 @@ class ClaimControllerIntegrationTest {
 		Long claimId = extractClaimId(createdClaimResult);
 		Long version = extractLong(createdClaimResult, "version");
 
-		// ASSERT — el salto directo a ACCEPTED devuelve 409.
+		MvcResult registered = changeStatus(adminToken, claimId, ClaimStatus.REGISTERED, version)
+				.andExpect(status().isOk())
+				.andReturn();
+		version = extractLong(registered, "version");
+		MvcResult underReview = changeStatus(adminToken, claimId, ClaimStatus.UNDER_REVIEW, version)
+				.andExpect(status().isOk())
+				.andReturn();
+		version = extractLong(underReview, "version");
+		MvcResult pendingCorrection = changeStatus(adminToken, claimId, ClaimStatus.PENDING_CORRECTION, version)
+				.andExpect(status().isOk())
+				.andReturn();
+		version = extractLong(pendingCorrection, "version");
+
+		// ASSERT — rechaza ACCEPTED y permite volver a REGISTERED.
 		changeStatus(adminToken, claimId, ClaimStatus.ACCEPTED, version)
 				.andExpect(status().isConflict())
 				.andExpect(jsonPath("$.code").value("INVALID_CLAIM_STATUS_TRANSITION"));
+		changeStatus(adminToken, claimId, ClaimStatus.REGISTERED, version)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("REGISTERED"));
+	}
+
+	@Test
+	void sameDayCreatedFromAndCreatedToIncludeTheLastInstantOfThatDate() throws Exception {
+		// ARRANGE — crear tres claims para aislar los dos límites UTC.
+		String adminToken = accessToken("admin@local.dev", "DevAdmin123!");
+		String searchMarker = "Same day boundary filter";
+		MvcResult includedClaimResult = createClaim(adminToken, searchMarker + " included")
+				.andExpect(status().isCreated())
+				.andReturn();
+		Long includedClaimId = extractClaimId(includedClaimResult);
+		String includedReference = extractText(includedClaimResult, "reference");
+		Long beforeRangeClaimId = extractClaimId(createClaim(adminToken, searchMarker + " before range")
+				.andExpect(status().isCreated())
+				.andReturn());
+		Long afterRangeClaimId = extractClaimId(createClaim(adminToken, searchMarker + " after range")
+				.andExpect(status().isCreated())
+				.andReturn());
+		String filterDate = "2026-06-15";
+		OffsetDateTime lastInstantOfDate = OffsetDateTime.parse("2026-06-15T23:59:59.999999Z");
+		jdbcTemplate.update("update claims set created_at = ? where id = ?", lastInstantOfDate, includedClaimId);
+		jdbcTemplate.update("update claims set created_at = ? where id = ?",
+				OffsetDateTime.parse("2026-06-14T23:59:59.999999Z"), beforeRangeClaimId);
+		jdbcTemplate.update("update claims set created_at = ? where id = ?",
+				OffsetDateTime.parse("2026-06-16T00:00:00Z"), afterRangeClaimId);
+
+		// ACT — filtrar el término compartido y el mismo día inclusivo.
+		mockMvc.perform(get("/api/v1/claims")
+					.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+					.param("search", searchMarker)
+					.param("createdFrom", filterDate)
+					.param("createdTo", filterDate))
+				// ASSERT — solo queda el claim del día, incluido su último instante.
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.totalElements").value(1))
+				.andExpect(jsonPath("$.content[0].reference").value(includedReference));
+	}
+
+	@Test
+	void putWithOmittedOrNullPriorityKeepsExistingPriority() throws Exception {
+		// ARRANGE — crear sin prioridad explícita y comprobar el default.
+		String adminToken = accessToken("admin@local.dev", "DevAdmin123!");
+		MvcResult createdClaimResult = mockMvc.perform(post("/api/v1/claims")
+					.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+							{"title":"Priority retention","description":"Priority test"}
+							"""))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.priority").value("NORMAL"))
+				.andReturn();
+		Long claimId = extractClaimId(createdClaimResult);
+		Long version = extractLong(createdClaimResult, "version");
+
+		// ACT — establecer HIGH para distinguir la prioridad previa.
+		MvcResult highPriorityResult = mockMvc.perform(put("/api/v1/claims/" + claimId)
+					.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+							{"title":"Priority retention","description":"Priority test","priority":"HIGH","version":%s}
+							""".formatted(version)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.priority").value("HIGH"))
+				.andReturn();
+		version = extractLong(highPriorityResult, "version");
+
+		// ASSERT — omitir priority y enviarla como null conservan HIGH.
+		MvcResult omittedPriorityResult = mockMvc.perform(put("/api/v1/claims/" + claimId)
+					.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+							{"title":"Omitted priority","description":"Keep existing priority","version":%s}
+							""".formatted(version)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.priority").value("HIGH"))
+				.andReturn();
+		version = extractLong(omittedPriorityResult, "version");
+
+		mockMvc.perform(put("/api/v1/claims/" + claimId)
+					.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+							{"title":"Null priority","description":"Keep existing priority","priority":null,"version":%s}
+							""".formatted(version)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.priority").value("HIGH"));
 	}
 
 	@Test

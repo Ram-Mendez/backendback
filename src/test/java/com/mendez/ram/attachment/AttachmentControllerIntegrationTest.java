@@ -380,11 +380,12 @@ class AttachmentControllerIntegrationTest {
 				.andExpect(status().isUnsupportedMediaType())
 				.andExpect(jsonPath("$.code").value("ATTACHMENT_TYPE_NOT_ALLOWED"));
 
-		// ASSERT — tras el rollback, el claim no tiene metadatos de adjunto.
+		// ASSERT — el rollback quita metadatos y el fichero físico.
 		mockMvc.perform(get("/api/v1/claims/" + claimId + "/attachments")
 						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$").isEmpty());
+		assertThat(Files.exists(claimStorageDirectory(claimId))).isFalse();
 	}
 
 	@Test
