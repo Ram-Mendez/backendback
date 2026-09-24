@@ -49,14 +49,18 @@ class ClaimControllerIntegrationTest {
 
 	@Test
 	void claimsRequireAuthentication() throws Exception {
+		// ACT — solicitar la lista sin credenciales.
 		mockMvc.perform(get("/api/v1/claims"))
+				// ASSERT — 401 identifica que falta autenticación.
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
 	}
 
 	@Test
 	void userCanCreateReadUpdateOwnDraftAndSubmit() throws Exception {
+		// ARRANGE — autenticar al usuario propietario del claim.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
+		// ACT — crear un borrador y capturar su ID, referencia y versión.
 		MvcResult createdClaimResult = createClaim(userToken, "Owner draft")
 				.andExpect(status().isCreated())
 				.andExpect(header().string(HttpHeaders.LOCATION, startsWith("http://localhost/api/v1/claims/")))
@@ -67,6 +71,7 @@ class ClaimControllerIntegrationTest {
 		String reference = extractText(createdClaimResult, "reference");
 		Long version = extractLong(createdClaimResult, "version");
 
+		// ACT — leer y actualizar el claim propio con su versión actual.
 		mockMvc.perform(get("/api/v1/claims/" + claimId).header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.reference").value(reference));
@@ -87,6 +92,7 @@ class ClaimControllerIntegrationTest {
 				.andReturn();
 		version = extractLong(updatedClaimResult, "version");
 
+		// ACT — enviar el borrador a registro usando la versión renovada.
 		changeStatus(userToken, claimId, ClaimStatus.REGISTERED, version)
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.status").value("REGISTERED"));
@@ -94,6 +100,7 @@ class ClaimControllerIntegrationTest {
 
 	@Test
 	void userCannotReviewOwnRegisteredClaim() throws Exception {
+		// ARRANGE — el usuario crea y registra su propio claim.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		MvcResult createdClaimResult = createClaim(userToken, "User forbidden review")
 				.andExpect(status().isCreated())
@@ -106,6 +113,7 @@ class ClaimControllerIntegrationTest {
 				.andReturn();
 		version = extractLong(registered, "version");
 
+		// ASSERT — revisar un claim propio devuelve 403 ACCESS_DENIED.
 		changeStatus(userToken, claimId, ClaimStatus.UNDER_REVIEW, version)
 				.andExpect(status().isForbidden())
 				.andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
@@ -113,6 +121,7 @@ class ClaimControllerIntegrationTest {
 
 	@Test
 	void managerCanReviewLifecycleAndFinalClaimCannotBeEdited() throws Exception {
+		// ARRANGE — el manager crea el claim que recorrerá el ciclo.
 		String managerToken = accessToken("manager@local.dev", "DevManager123!");
 		MvcResult createdClaimResult = createClaim(managerToken, "Manager lifecycle")
 				.andExpect(status().isCreated())
@@ -120,6 +129,7 @@ class ClaimControllerIntegrationTest {
 		Long claimId = extractClaimId(createdClaimResult);
 		Long version = extractLong(createdClaimResult, "version");
 
+		// ACT — avanzar por los estados válidos y conservar cada versión.
 		MvcResult registered = changeStatus(managerToken, claimId, ClaimStatus.REGISTERED, version)
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.status").value("REGISTERED"))
@@ -144,6 +154,7 @@ class ClaimControllerIntegrationTest {
 				version);
 		String updateRequestJson = objectMapper.writeValueAsString(updateRequest);
 
+		// ASSERT — un claim final rechaza edición con 409 CLAIM_NOT_EDITABLE.
 		mockMvc.perform(put("/api/v1/claims/" + claimId)
 						.header(HttpHeaders.AUTHORIZATION, bearer(managerToken))
 						.contentType(MediaType.APPLICATION_JSON)
@@ -154,6 +165,7 @@ class ClaimControllerIntegrationTest {
 
 	@Test
 	void invalidTransitionReturnsConflict() throws Exception {
+		// ARRANGE — crear un borrador para probar una transición no permitida.
 		String adminToken = accessToken("admin@local.dev", "DevAdmin123!");
 		MvcResult createdClaimResult = createClaim(adminToken, "Invalid transition")
 				.andExpect(status().isCreated())
@@ -161,6 +173,7 @@ class ClaimControllerIntegrationTest {
 		Long claimId = extractClaimId(createdClaimResult);
 		Long version = extractLong(createdClaimResult, "version");
 
+		// ASSERT — el salto directo a ACCEPTED devuelve 409.
 		changeStatus(adminToken, claimId, ClaimStatus.ACCEPTED, version)
 				.andExpect(status().isConflict())
 				.andExpect(jsonPath("$.code").value("INVALID_CLAIM_STATUS_TRANSITION"));
@@ -168,12 +181,14 @@ class ClaimControllerIntegrationTest {
 
 	@Test
 	void listSupportsFiltersPaginationAndSorting() throws Exception {
+		// ARRANGE — crear un claim único para aislar los filtros.
 		String adminToken = accessToken("admin@local.dev", "DevAdmin123!");
 		MvcResult createdClaimResult = createClaim(adminToken, "Filter unique claim")
 				.andExpect(status().isCreated())
 				.andReturn();
 		String reference = extractText(createdClaimResult, "reference");
 
+		// ACT — combinar referencia, estado, página, tamaño y orden.
 		mockMvc.perform(get("/api/v1/claims")
 						.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
 						.param("reference", reference)
@@ -188,6 +203,7 @@ class ClaimControllerIntegrationTest {
 
 	@Test
 	void managerWorkflowRecordsAssignmentEditCommentAndStatusHistory() throws Exception {
+		// ARRANGE — crear claim y consultar un revisor elegible.
 		String managerAccessToken = accessToken("manager@local.dev", "DevManager123!");
 		MvcResult createdClaimResult = createClaim(managerAccessToken, "Workflow history")
 				.andExpect(status().isCreated())
@@ -195,11 +211,13 @@ class ClaimControllerIntegrationTest {
 		Long claimId = extractClaimId(createdClaimResult);
 		Long claimVersion = extractLong(createdClaimResult, "version");
 		ReviewerTestData reviewer = firstEligibleReviewer(managerAccessToken);
+		// ACT — asignar el revisor y continuar con la nueva versión.
 		MvcResult assignedClaimResult = assignClaim(managerAccessToken, claimId, reviewer.id(), claimVersion)
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.assignedToId").value(reviewer.id()))
 				.andReturn();
 		claimVersion = extractLong(assignedClaimResult, "version");
+		// ACT — editar prioridad/detalle y añadir un comentario.
 		String updateRequestJson = """
 				{
 				  "title": "Workflow edited",
@@ -221,6 +239,7 @@ class ClaimControllerIntegrationTest {
 						.content("{\"body\":\"Internal review note\"}"))
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.body").value("Internal review note"));
+		// ACT — cambiar estado y consultar el historial resultante.
 		changeStatus(managerAccessToken, claimId, ClaimStatus.REGISTERED, claimVersion)
 				.andExpect(status().isOk());
 		mockMvc.perform(get("/api/v1/claims/" + claimId + "/history")
@@ -234,6 +253,7 @@ class ClaimControllerIntegrationTest {
 
 	@Test
 	void staleAssignmentVersionReturnsConflict() throws Exception {
+		// ARRANGE — guardar la versión anterior a la primera asignación.
 		String managerAccessToken = accessToken("manager@local.dev", "DevManager123!");
 		MvcResult createdClaimResult = createClaim(managerAccessToken, "Stale assignment")
 				.andExpect(status().isCreated())
@@ -242,6 +262,7 @@ class ClaimControllerIntegrationTest {
 		Long staleVersion = extractLong(createdClaimResult, "version");
 		ReviewerTestData reviewer = firstEligibleReviewer(managerAccessToken);
 
+		// ACT — repetir la asignación usando la versión ya obsoleta.
 		assignClaim(managerAccessToken, claimId, reviewer.id(), staleVersion)
 				.andExpect(status().isOk());
 		assignClaim(managerAccessToken, claimId, reviewer.id(), staleVersion)
@@ -251,6 +272,7 @@ class ClaimControllerIntegrationTest {
 
 	@Test
 	void assignedToFilterMatchesAssigneeInsteadOfClaimCreator() throws Exception {
+		// ARRANGE — asignar el claim a un revisor distinto del creador.
 		String managerAccessToken = accessToken("manager@local.dev", "DevManager123!");
 		MvcResult createdClaimResult = createClaim(managerAccessToken, "Assigned filter target")
 				.andExpect(status().isCreated())
@@ -261,6 +283,7 @@ class ClaimControllerIntegrationTest {
 		assignClaim(managerAccessToken, claimId, reviewer.id(), claimVersion)
 				.andExpect(status().isOk());
 
+		// ACT — filtrar por el username del revisor asignado.
 		mockMvc.perform(get("/api/v1/claims")
 						.header(HttpHeaders.AUTHORIZATION, bearer(managerAccessToken))
 						.param("search", "Assigned filter target")
@@ -272,6 +295,7 @@ class ClaimControllerIntegrationTest {
 
 	@Test
 	void disabledAssigneeReturnsInvalidAssignee() throws Exception {
+		// ARRANGE — obtener el ID de la cuenta deshabilitada de los datos de test.
 		String managerAccessToken = accessToken("manager@local.dev", "DevManager123!");
 		MvcResult createdClaimResult = createClaim(managerAccessToken, "Disabled assignee")
 				.andExpect(status().isCreated())
@@ -288,6 +312,7 @@ class ClaimControllerIntegrationTest {
 				}
 				""".formatted(disabledUserId, claimVersion);
 
+		// ASSERT — el endpoint responde 400 INVALID_ASSIGNEE.
 		mockMvc.perform(patch("/api/v1/claims/" + claimId + "/assignment")
 						.header(HttpHeaders.AUTHORIZATION, bearer(managerAccessToken))
 						.contentType(MediaType.APPLICATION_JSON)
@@ -298,8 +323,10 @@ class ClaimControllerIntegrationTest {
 
 	@Test
 	void validationAndNotFoundUseProblemDetails() throws Exception {
+		// ARRANGE — autenticar una cuenta con permiso de administración.
 		String adminToken = accessToken("admin@local.dev", "DevAdmin123!");
 
+		// ASSERT — un cuerpo inválido devuelve 400 VALIDATION_ERROR.
 		mockMvc.perform(post("/api/v1/claims")
 						.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
 						.contentType(MediaType.APPLICATION_JSON)
@@ -309,11 +336,13 @@ class ClaimControllerIntegrationTest {
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
 
+		// ASSERT — un ID inexistente devuelve 404 CLAIM_NOT_FOUND.
 		mockMvc.perform(get("/api/v1/claims/999999999").header(HttpHeaders.AUTHORIZATION, bearer(adminToken)))
 				.andExpect(status().isNotFound())
 				.andExpect(jsonPath("$.code").value("CLAIM_NOT_FOUND"));
 	}
 
+	// token autentica la request; title identifica el escenario del claim.
 	private org.springframework.test.web.servlet.ResultActions createClaim(String token, String title) throws Exception {
 		CreateClaimRequest createRequest = new CreateClaimRequest(
 				title,
@@ -326,6 +355,7 @@ class ClaimControllerIntegrationTest {
 				.content(createRequestJson));
 	}
 
+	// version debe ser la devuelta por la operación anterior sobre el claim.
 	private org.springframework.test.web.servlet.ResultActions changeStatus(String token, Long claimId, ClaimStatus targetStatus,
 			Long version) throws Exception {
 		ChangeClaimStatusRequest statusChangeRequest = new ChangeClaimStatusRequest(targetStatus, version);
@@ -336,6 +366,7 @@ class ClaimControllerIntegrationTest {
 				.content(statusChangeRequestJson));
 	}
 
+	// reviewerId identifica al asignado; version evita actualizar datos obsoletos.
 	private org.springframework.test.web.servlet.ResultActions assignClaim(
 			String token,
 			Long claimId,
@@ -353,6 +384,7 @@ class ClaimControllerIntegrationTest {
 				.content(assignmentRequestJson));
 	}
 
+	// Devuelve juntos ID y username del primer revisor habilitado por la API.
 	private ReviewerTestData firstEligibleReviewer(String token) throws Exception {
 		MvcResult eligibleReviewersResult = mockMvc.perform(get("/api/v1/claims/reviewers")
 						.header(HttpHeaders.AUTHORIZATION, bearer(token)))
@@ -383,6 +415,7 @@ class ClaimControllerIntegrationTest {
 		return claimId;
 	}
 
+	// fieldName indica qué valor numérico leer del JSON de respuesta.
 	private Long extractLong(MvcResult requestResult, String fieldName) {
 		try {
 			String responseJson = requestResult.getResponse().getContentAsString();
@@ -394,6 +427,7 @@ class ClaimControllerIntegrationTest {
 		}
 	}
 
+	// fieldName indica qué texto leer del JSON de respuesta.
 	private String extractText(MvcResult requestResult, String fieldName) {
 		try {
 			String responseJson = requestResult.getResponse().getContentAsString();

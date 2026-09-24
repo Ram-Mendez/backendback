@@ -14,6 +14,7 @@ class RamApplicationTests {
 
 	@Test
 	void contextLoads() {
+		// Cargar el contexto comprueba que arranque la aplicación de test.
 	}
 
 }

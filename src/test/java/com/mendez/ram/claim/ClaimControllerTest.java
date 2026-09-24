@@ -48,6 +48,7 @@ class ClaimControllerTest {
 
 	@BeforeEach
 	void setUp() {
+		// MockMvc aislado: el servicio es simulado y el principal se resuelve a null.
 		claimService = mock(ClaimService.class);
 		mockMvc = MockMvcBuilders
 				.standaloneSetup(new ClaimController(claimService))
@@ -58,6 +59,7 @@ class ClaimControllerTest {
 
 	@Test
 	void getReturnsStablePagedResponse() throws Exception {
+		// ARRANGE — fijar una respuesta paginada conocida del servicio.
 		ClaimSummaryResponse matchingClaim = new ClaimSummaryResponse(
 				1L, "CLM-2026-000001", "Claim title", ClaimStatus.DRAFT, 1L, "dev-user", NOW, NOW);
 		int pageNumber = 0;
@@ -70,9 +72,11 @@ class ClaimControllerTest {
 				List.of(matchingClaim), pageNumber, pageSize, totalElements, totalPages, firstPage, lastPage);
 		when(claimService.searchClaims(any(), any(Pageable.class), any())).thenReturn(expectedPage);
 
+		// ACT — consultar la lista con búsqueda y orden explícitos.
 		mockMvc.perform(get("/api/v1/claims")
 						.param("search", "claim")
 						.param("sort", "createdAt,desc"))
+				// ASSERT — la API conserva los datos y metadatos de página.
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.content[0].reference").value("CLM-2026-000001"))
 				.andExpect(jsonPath("$.page").value(0))
@@ -82,14 +86,17 @@ class ClaimControllerTest {
 
 	@Test
 	void postCreatesClaimAndSetsLocation() throws Exception {
+		// ARRANGE — el servicio devuelve el claim recién creado.
 		when(claimService.createClaim(any(), any()))
 				.thenReturn(claimResponse(10L, "CLM-2026-000010", ClaimStatus.DRAFT));
 
+		// ACT — enviar el JSON de creación al endpoint.
 		mockMvc.perform(post("/api/v1/claims")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{"title":"Claim title","description":"Claim description"}
 								"""))
+				// ASSERT — 201 incluye la URL del recurso creado.
 				.andExpect(status().isCreated())
 				.andExpect(header().string(HttpHeaders.LOCATION,
 						Matchers.endsWith("/api/v1/claims/10")))
@@ -98,9 +105,11 @@ class ClaimControllerTest {
 
 	@Test
 	void putUpdatesClaim() throws Exception {
+		// ARRANGE — preparar la respuesta del claim identificado por 10.
 		when(claimService.updateClaim(eq(10L), any(), any()))
 				.thenReturn(claimResponse(10L, "CLM-2026-000010", ClaimStatus.DRAFT));
 
+		// ACT — enviar la actualización con la versión actual.
 		mockMvc.perform(put("/api/v1/claims/10")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
@@ -112,9 +121,11 @@ class ClaimControllerTest {
 
 	@Test
 	void patchChangesStatus() throws Exception {
+		// ARRANGE — el servicio devuelve el nuevo estado registrado.
 		when(claimService.updateClaimStatus(eq(10L), any(), any()))
 				.thenReturn(claimResponse(10L, "CLM-2026-000010", ClaimStatus.REGISTERED));
 
+		// ACT — solicitar el cambio de estado para el claim 10.
 		mockMvc.perform(patch("/api/v1/claims/10/status")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
@@ -126,7 +137,9 @@ class ClaimControllerTest {
 
 	@Test
 	void invalidSortReturnsBadRequest() throws Exception {
+		// ACT — pedir orden por un campo interno no permitido.
 		mockMvc.perform(get("/api/v1/claims").param("sort", "passwordHash,desc"))
+				// ASSERT — 400 identifica el parámetro de orden inválido.
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("INVALID_SORT_FIELD"));
 	}

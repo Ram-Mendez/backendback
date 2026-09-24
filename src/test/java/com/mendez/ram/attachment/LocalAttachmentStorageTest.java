@@ -24,14 +24,17 @@ class LocalAttachmentStorageTest {
 
 	@Test
 	void storesStreamsLoadsAndDeletesFilesWithinRoot() throws Exception {
+		// ARRANGE — usar un directorio temporal aislado para el storage.
 		LocalAttachmentStorage storage = storage();
 		byte[] content = "Hola storage".getBytes(StandardCharsets.UTF_8);
 		StoreAttachmentCommand storageCommand = new StoreAttachmentCommand(
 				"claims/1/file.txt", new ByteArrayInputStream(content));
 
+		// ACT — guardar, volver a leer y luego borrar el mismo recurso.
 		var stored = storage.store(storageCommand);
 		var loaded = storage.load("claims/1/file.txt");
 
+		// ASSERT — bytes y hash corresponden al contenido guardado.
 		assertThat(stored.sizeBytes()).isEqualTo(content.length);
 		assertThat(stored.sha256()).hasSize(64);
 		try (var input = loaded.inputStream()) {
@@ -45,17 +48,20 @@ class LocalAttachmentStorageTest {
 
 	@Test
 	void rejectsStorageKeysThatEscapeRoot() {
+		// ARRANGE — la clave intenta salir del directorio raíz.
 		LocalAttachmentStorage storage = storage();
 		byte[] content = "escape".getBytes(StandardCharsets.UTF_8);
 		StoreAttachmentCommand escapingStorageCommand = new StoreAttachmentCommand(
 				"../escape.txt", new ByteArrayInputStream(content));
 
+		// ASSERT — no se permite escribir fuera del storage.
 		assertThatThrownBy(() -> storage.store(escapingStorageCommand))
 				.isInstanceOf(ApiException.class);
 	}
 
 	@Test
 	void removesPartiallyWrittenFileWhenInputStreamFails() {
+		// ARRANGE — el stream entrega bytes parciales y después falla.
 		LocalAttachmentStorage storage = storage();
 		byte[] partialContent = "partial".getBytes(StandardCharsets.UTF_8);
 		InputStream failingInput = new InputStream() {
@@ -78,6 +84,7 @@ class LocalAttachmentStorageTest {
 		};
 		StoreAttachmentCommand storageCommand = new StoreAttachmentCommand("claims/1/partial.txt", failingInput);
 
+		// ASSERT — el fallo se informa y no deja un archivo incompleto.
 		assertThatThrownBy(() -> storage.store(storageCommand))
 				.isInstanceOf(ApiException.class);
 		assertThat(Files.exists(tempDir.resolve("claims/1/partial.txt"))).isFalse();

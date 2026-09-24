@@ -81,15 +81,18 @@ class AttachmentControllerIntegrationTest {
 
 	@BeforeEach
 	void cleanStorageRoot() throws IOException {
+		// Aislar cada caso también en la carpeta física.
 		recordingStorage.reset();
 		deleteRecursively(attachmentProperties.getLocalStorageRoot().toAbsolutePath().normalize());
 	}
 
 	@Test
 	void uploadsListsDownloadsAndDeletesMultipleAttachmentsKeepingFolderStructure() throws Exception {
+		// ARRANGE — crear un claim propio para el recorrido completo.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments happy path");
 
+		// ACT — subir dos archivos y conservar sus rutas relativas.
 		MvcResult uploaded = mockMvc.perform(upload(userToken, claimId,
 				textFile("files", "invoice.txt", "Factura"),
 				textFile("files", "notes.txt", "Notas"))
@@ -101,8 +104,10 @@ class AttachmentControllerIntegrationTest {
 				.andExpect(jsonPath("$[0].sizeBytes").value(7))
 				.andExpect(jsonPath("$[1].relativePath").value("docs/2026/sub/notes.txt"))
 				.andReturn();
+		// El UUID sale de la respuesta de subida y se reutiliza abajo.
 		UUID firstAttachmentId = extractUuid(uploaded, 0);
 
+		// ASSERT — listar conserva carpetas; descargar devuelve el contenido.
 		mockMvc.perform(get("/api/v1/claims/" + claimId + "/attachments")
 						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
 				.andExpect(status().isOk())
@@ -115,6 +120,7 @@ class AttachmentControllerIntegrationTest {
 				.andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, containsString("invoice.txt")))
 				.andExpect(content().string("Factura"));
 
+		// ACT — borrar el primer archivo y comprobar que ya no se descarga.
 		mockMvc.perform(delete("/api/v1/claims/" + claimId + "/attachments/" + firstAttachmentId)
 						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
 				.andExpect(status().isNoContent());
@@ -127,15 +133,18 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void committedCsvUploadRemainsDownloadable() throws Exception {
+		// ARRANGE — preparar un CSV válido para comprobar el archivo persistido.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Committed CSV attachment");
 		String csvContent = "id,amount\n1,42\n";
+		// ACT — subir el CSV con su tipo MIME y ruta relativa.
 		MvcResult uploadResult = mockMvc.perform(upload(userToken, claimId,
 				new MockMultipartFile("files", "report.csv", "text/csv",
 						csvContent.getBytes(StandardCharsets.UTF_8)))
 						.param("relativePaths", "exports/report.csv"))
 				.andExpect(status().isCreated())
 				.andReturn();
+		// ASSERT — el UUID emitido permite descargar los mismos bytes.
 		UUID attachmentId = extractUuid(uploadResult, 0);
 
 		mockMvc.perform(get("/api/v1/claims/" + claimId + "/attachments/" + attachmentId + "/content")
@@ -146,9 +155,11 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void uploadWithoutRelativePathsUsesOriginalFilenameAndAllowsOctetStreamWhenContentMatches() throws Exception {
+		// ARRANGE — claim propio y archivo de texto etiquetado como binario.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments optional relative paths");
 
+		// ASSERT — sin relativePaths se conserva el nombre original.
 		mockMvc.perform(upload(userToken, claimId,
 				new MockMultipartFile("files", "plain.txt", "application/octet-stream",
 						"Plain content".getBytes(StandardCharsets.UTF_8))))
@@ -160,9 +171,11 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void exposesUploadCapabilitiesForBatchingClients() throws Exception {
+		// ARRANGE — crear el claim sobre el que consultar límites.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments capabilities");
 
+		// ASSERT — la respuesta publica los límites del multipart.
 		mockMvc.perform(get("/api/v1/claims/" + claimId + "/attachments/capabilities")
 						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
 				.andExpect(status().isOk())
@@ -173,9 +186,11 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void duplicateRelativePathsAreKeptWithStableSuffixes() throws Exception {
+		// ARRANGE — dos archivos distintos comparten la misma ruta solicitada.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments duplicate path");
 
+		// ASSERT — el segundo nombre recibe un sufijo estable.
 		mockMvc.perform(upload(userToken, claimId,
 				textFile("files", "report.txt", "Uno"),
 				textFile("files", "report.txt", "Dos"))
@@ -187,15 +202,18 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void concurrentUploadsWithSameRelativePathAreSerializedAndSuffixed() throws Exception {
+		// ARRANGE — dos requests competirán por la misma ruta.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments concurrent duplicate path");
 		ExecutorService executor = Executors.newFixedThreadPool(2);
+		// La barrera libera ambas cargas para solaparlas.
 		CountDownLatch start = new CountDownLatch(1);
 		try {
 			Future<Integer> firstUploadStatus = executor.submit(() -> uploadRaceFile(userToken, claimId, start, "Uno"));
 			Future<Integer> secondUploadStatus = executor.submit(() -> uploadRaceFile(userToken, claimId, start, "Dos"));
 			start.countDown();
 
+			// ASSERT — ambas cargas responden 201 y quedan dos rutas únicas.
 			List<Integer> completedUploadStatuses = List.of(firstUploadStatus.get(), secondUploadStatus.get());
 			assertThat(completedUploadStatuses).containsOnly(201);
 		}
@@ -211,20 +229,24 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void rejectsTraversalTooLargeAndKnownSignatureMismatch() throws Exception {
+		// ARRANGE — usar un claim propio para probar rechazos de subida.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments validation");
 
+		// ASSERT — la ruta de traversal devuelve 400 INVALID_ATTACHMENT_PATH.
 		mockMvc.perform(upload(userToken, claimId, textFile("files", "secret.txt", "No"))
 				.param("relativePaths", "../secret.txt"))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("INVALID_ATTACHMENT_PATH"));
 
+		// ASSERT — superar el máximo por archivo devuelve 413.
 		mockMvc.perform(upload(userToken, claimId, new MockMultipartFile("files", "huge.txt", "text/plain",
 				"x".repeat(1200).getBytes(StandardCharsets.UTF_8)))
 				.param("relativePaths", "huge.txt"))
 				.andExpect(status().isPayloadTooLarge())
 				.andExpect(jsonPath("$.code").value("ATTACHMENT_FILE_TOO_LARGE"));
 
+		// ASSERT — el tipo declarado no coincide con la firma del contenido.
 		mockMvc.perform(upload(userToken, claimId, new MockMultipartFile("files", "fake.png", "image/png",
 				"not really a png".getBytes(StandardCharsets.UTF_8)))
 				.param("relativePaths", "fake.png"))
@@ -234,9 +256,11 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void acceptsGenericUnknownFormatWithUnknownExtension() throws Exception {
+		// ARRANGE — contenido binario válido sin extensión conocida.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments unknown format");
 
+		// ACT — subir bytes con una extensión y un MIME no registrados.
 		mockMvc.perform(upload(userToken, claimId,
 				new MockMultipartFile("files", "model.never-seen-before", "application/x-new-format",
 						new byte[] { 0x13, 0x37, 0x42, 0x00, 0x55 }))
@@ -249,9 +273,11 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void acceptsRealXlsSignatureWithoutRequiringBrowserMimeVariant() throws Exception {
+		// ARRANGE — firma XLS real con el MIME genérico del navegador.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments xls");
 
+		// ACT — subir la firma XLS usando ese MIME.
 		mockMvc.perform(upload(userToken, claimId,
 				new MockMultipartFile("files", "legacy.xls", "application/x-ole-storage", oleCompoundBytes()))
 				.param("relativePaths", "spreadsheets/legacy.xls"))
@@ -262,9 +288,11 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void acceptsPptxAndGenericBinaryArchiveFormats() throws Exception {
+		// ARRANGE — bytes de ZIP/PPTX y firma binaria 7z.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments office and archives");
 
+		// ACT — subir una presentación y un archivo 7z.
 		mockMvc.perform(upload(userToken, claimId,
 				new MockMultipartFile("files", "deck.pptx",
 						"application/vnd.openxmlformats-officedocument.presentationml.presentation", zipBytes()),
@@ -277,9 +305,11 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void acceptsMissingBrowserMimeOctetStreamUnknownExtensionAndNoExtension() throws Exception {
+		// ARRANGE — cubrir MIME ausente, octet-stream y archivo sin extensión.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments generic content types");
 
+		// ACT — subir las tres variantes de MIME/nombre.
 		mockMvc.perform(upload(userToken, claimId,
 				new MockMultipartFile("files", "no-mime.asset", null, new byte[] { 1, 2, 3, 4 }),
 				new MockMultipartFile("files", "octet.payload", "application/octet-stream", new byte[] { 5, 6, 7 }),
@@ -294,19 +324,23 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void rejectsMissingPartsPathMismatchAndRequestLimits() throws Exception {
+		// ARRANGE — crear un claim para enviar formas multipart inválidas.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments request shape");
 
+		// ASSERT — el request sin archivos devuelve 400.
 		mockMvc.perform(multipart("/api/v1/claims/" + claimId + "/attachments")
 						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("ATTACHMENT_REQUIRED"));
 
+		// ASSERT — cantidad de rutas y partes debe coincidir.
 		mockMvc.perform(upload(userToken, claimId, textFile("files", "one.txt", "Uno"))
 				.param("relativePaths", "one.txt", "extra.txt"))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("INVALID_ATTACHMENT_PATH"));
 
+		// ASSERT — demasiados archivos devuelve ATTACHMENT_LIMIT_EXCEEDED.
 		mockMvc.perform(upload(userToken, claimId,
 				textFile("files", "one.txt", "Uno"),
 				textFile("files", "two.txt", "Dos"),
@@ -315,6 +349,7 @@ class AttachmentControllerIntegrationTest {
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("ATTACHMENT_LIMIT_EXCEEDED"));
 
+		// ASSERT — el tamaño conjunto supera el límite del request.
 		String largeText = "x".repeat(800);
 		mockMvc.perform(upload(userToken, claimId,
 				textFile("files", "one.txt", largeText),
@@ -332,9 +367,11 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void multiUploadRollbackLeavesNoAttachmentMetadataWhenLaterFileFails() throws Exception {
+		// ARRANGE — el primer archivo es válido y el segundo tiene firma falsa.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments rollback cleanup");
 
+		// ACT — la segunda parte provoca el rechazo del lote.
 		mockMvc.perform(upload(userToken, claimId,
 				textFile("files", "ok.txt", "Ok"),
 				new MockMultipartFile("files", "fake.png", "image/png",
@@ -343,6 +380,7 @@ class AttachmentControllerIntegrationTest {
 				.andExpect(status().isUnsupportedMediaType())
 				.andExpect(jsonPath("$.code").value("ATTACHMENT_TYPE_NOT_ALLOWED"));
 
+		// ASSERT — tras el rollback, el claim no tiene metadatos de adjunto.
 		mockMvc.perform(get("/api/v1/claims/" + claimId + "/attachments")
 						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
 				.andExpect(status().isOk())
@@ -351,6 +389,7 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void deleteCommitsMetadataEvenIfPhysicalCleanupFailsAfterCommit() throws Exception {
+		// ARRANGE — subir un archivo y preparar un fallo físico de borrado.
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(userToken, "Attachments delete cleanup failure");
 		MvcResult uploaded = mockMvc.perform(upload(userToken, claimId, textFile("files", "delete.txt", "Delete me"))
@@ -359,11 +398,13 @@ class AttachmentControllerIntegrationTest {
 				.andReturn();
 		UUID attachmentId = extractUuid(uploaded, 0);
 
+		// ACT — la limpieza física falla después de borrar por API.
 		recordingStorage.failNextDelete();
 		mockMvc.perform(delete("/api/v1/claims/" + claimId + "/attachments/" + attachmentId)
 						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
 				.andExpect(status().isNoContent());
 
+		// ASSERT — metadatos borrados; el contenido ya no se publica.
 		assertThat(recordingStorage.failedDeletes()).isEqualTo(1);
 		mockMvc.perform(get("/api/v1/claims/" + claimId + "/attachments")
 						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
@@ -378,6 +419,7 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void userCannotAccessAnotherUsersClaimAttachments() throws Exception {
+		// ARRANGE — manager crea el claim privado y sube un archivo.
 		String managerToken = accessToken("manager@local.dev", "DevManager123!");
 		String userToken = accessToken("user@local.dev", "DevUser123!");
 		Long claimId = createClaim(managerToken, "Manager private attachment");
@@ -385,6 +427,7 @@ class AttachmentControllerIntegrationTest {
 				.param("relativePaths", "manager.txt"))
 				.andExpect(status().isCreated())
 				.andReturn();
+		// El usuario distinto intenta listar, descargar y borrar ese recurso.
 		UUID attachmentId = extractUuid(uploaded, 0);
 
 		mockMvc.perform(get("/api/v1/claims/" + claimId + "/attachments")
@@ -404,7 +447,43 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	@Test
+	void userCannotDownloadAttachmentFromAnotherClaim() throws Exception {
+		// ARRANGE — autenticar propietario y manager; crear dos claims distintos.
+		String userToken = accessToken("user@local.dev", "DevUser123!");
+		String managerToken = accessToken("manager@local.dev", "DevManager123!");
+
+		Long ownClaimId = createClaim(userToken, "User own claim");
+		Long foreignClaimId = createClaim(managerToken, "Manager foreign claim");
+
+		// ACT — el manager sube el archivo a su propio claim.
+		MvcResult uploaded = mockMvc.perform(
+						upload(
+								managerToken,
+								foreignClaimId,
+								textFile(
+										"files",                 // Campo multipart.
+										"foreign.txt",           // Nombre enviado.
+										"Foreign attachment"))    // Contenido.
+								.param("relativePaths", "foreign.txt"))
+				.andExpect(status().isCreated())
+				.andReturn();
+
+		// Extraer el UUID que devolvió el backend para la descarga.
+		UUID foreignAttachmentId = extractUuid(uploaded, 0);
+
+		// ASSERT — usarlo con el claim propio devuelve 404 ATTACHMENT_NOT_FOUND.
+		mockMvc.perform(get(
+						"/api/v1/claims/" + ownClaimId
+								+ "/attachments/" + foreignAttachmentId
+								+ "/content")
+						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.code").value("ATTACHMENT_NOT_FOUND"));
+	}
+
+	@Test
 	void finalClaimDoesNotAllowUploadOrDelete() throws Exception {
+		// ARRANGE — subir un archivo y llevar el claim a estado final.
 		String managerToken = accessToken("manager@local.dev", "DevManager123!");
 		MvcResult created = createClaimResult(managerToken, "Attachments final claim");
 		Long claimId = extractLong(created, "id");
@@ -418,6 +497,7 @@ class AttachmentControllerIntegrationTest {
 		version = changeStatus(managerToken, claimId, ClaimStatus.UNDER_REVIEW, version);
 		changeStatus(managerToken, claimId, ClaimStatus.ACCEPTED, version);
 
+		// ASSERT — el estado final bloquea nuevas subidas y borrados.
 		mockMvc.perform(upload(managerToken, claimId, textFile("files", "blocked.txt", "Blocked"))
 				.param("relativePaths", "blocked.txt"))
 				.andExpect(status().isConflict())
@@ -431,12 +511,14 @@ class AttachmentControllerIntegrationTest {
 
 	@Test
 	void claimAttachmentDatabaseConstraintsArePresent() {
+		// ARRANGE — consultar las restricciones instaladas en PostgreSQL.
 		List<String> constraints = jdbcTemplate.queryForList("""
 				select conname
 				from pg_constraint
 				where conrelid = 'claim_attachments'::regclass
 				""", String.class);
 
+		// ASSERT — claves, checks y unicidad protegen metadatos y rutas.
 		assertThat(constraints).contains(
 				"fk_claim_attachments_claim",
 				"fk_claim_attachments_created_by",
@@ -455,6 +537,7 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	private MockMultipartFile textFile(String name, String fileName, String content) {
+		// name: campo multipart; fileName: nombre visible; content: bytes.
 		return new MockMultipartFile(name, fileName, "text/plain", content.getBytes(StandardCharsets.UTF_8));
 	}
 
@@ -473,10 +556,12 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	private Long createClaim(String token, String title) throws Exception {
+		// El identificador procede del JSON devuelto al crear el claim.
 		return extractLong(createClaimResult(token, title), "id");
 	}
 
 	private MvcResult createClaimResult(String token, String title) throws Exception {
+		// Este helper crea un claim real por HTTP y devuelve su respuesta.
 		CreateClaimRequest createRequest = new CreateClaimRequest(
 				title,
 				"Reclamacion generada por test de adjuntos.",
@@ -492,6 +577,7 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	private int uploadRaceFile(String token, Long claimId, CountDownLatch start, String content) throws Exception {
+		// Ambas tareas esperan la barrera antes de enviar el mismo path.
 		start.await();
 		return mockMvc.perform(upload(token, claimId, textFile("files", "race.txt", content))
 				.param("relativePaths", "folder/race.txt"))
@@ -526,6 +612,7 @@ class AttachmentControllerIntegrationTest {
 		return issuedTokens.accessToken();
 	}
 
+	// fieldName indica qué valor numérico leer del JSON de respuesta.
 	private Long extractLong(MvcResult requestResult, String fieldName) {
 		try {
 			String responseJson = requestResult.getResponse().getContentAsString();
@@ -539,6 +626,7 @@ class AttachmentControllerIntegrationTest {
 
 	private UUID extractUuid(MvcResult attachmentListResult, int index) {
 		try {
+			// Leer el UUID del elemento indicado en la respuesta JSON.
 			String responseJson = attachmentListResult.getResponse().getContentAsString();
 			var attachmentList = objectMapper.readTree(responseJson);
 			var attachment = attachmentList.get(index);
@@ -579,6 +667,7 @@ class AttachmentControllerIntegrationTest {
 		@Bean
 		@Primary
 		RecordingAttachmentStorage recordingAttachmentStorage(AttachmentProperties properties) {
+			// Envolver storage real para poder inyectar fallos controlados.
 			return new RecordingAttachmentStorage(new LocalAttachmentStorage(properties));
 		}
 	}
@@ -606,6 +695,7 @@ class AttachmentControllerIntegrationTest {
 		@Override
 		public void delete(String storageKey) {
 			if (failNextDelete) {
+				// Simular un fallo físico posterior al cambio de metadatos.
 				failNextDelete = false;
 				failedDeletes++;
 				throw new IllegalStateException("Simulated attachment delete failure");

@@ -12,6 +12,7 @@ public class TestcontainersConfiguration {
 	@Bean
 	@ServiceConnection
 	PostgreSQLContainer postgresContainer() {
+		// La conexión se configura automáticamente para los tests.
 		return new PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"));
 	}
 

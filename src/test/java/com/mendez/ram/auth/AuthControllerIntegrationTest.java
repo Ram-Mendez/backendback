@@ -49,6 +49,7 @@ class AuthControllerIntegrationTest {
 
 	@Test
 	void loginUsesExistingAuthUserAndStoresOnlyRefreshTokenHash() throws Exception {
+		// ACT — iniciar sesión con una cuenta precargada.
 		MvcResult loginResult = login("admin@local.dev", "DevAdmin123!")
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.accessToken").isNotEmpty())
@@ -58,8 +59,10 @@ class AuthControllerIntegrationTest {
 				.andExpect(jsonPath("$.user.roles").value(hasItem("ROLE_ADMIN")))
 				.andReturn();
 
+		// Preparar el refresh token emitido para comprobar cómo se almacena.
 		String loginResponseJson = loginResult.getResponse().getContentAsString();
 		AuthTokenResponse issuedTokens = objectMapper.readValue(loginResponseJson, AuthTokenResponse.class);
+		// ASSERT — la base guarda el hash, nunca el token en claro.
 		transactionTemplate.executeWithoutResult(status -> {
 			String refreshTokenHash = tokenHashingService.sha256Hex(issuedTokens.refreshToken());
 			var tokenStoredByHash = refreshTokenRepository.findByTokenHashAndRevokedAtIsNull(refreshTokenHash);
@@ -71,6 +74,7 @@ class AuthControllerIntegrationTest {
 
 	@Test
 	void loginRejectsBadCredentials() throws Exception {
+		// ASSERT — contraseña incorrecta responde 401 con código estable.
 		login("admin@local.dev", "wrong-password")
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.code").value("BAD_CREDENTIALS"));
@@ -78,6 +82,7 @@ class AuthControllerIntegrationTest {
 
 	@Test
 	void loginReturnsDistinctAccountStateErrors() throws Exception {
+		// ASSERT — cada estado de cuenta conserva su status y código.
 		login("locked@local.dev", "DevLocked123!")
 				.andExpect(status().isLocked())
 				.andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"));
@@ -93,10 +98,12 @@ class AuthControllerIntegrationTest {
 
 	@Test
 	void refreshRotatesRefreshToken() throws Exception {
+		// ARRANGE — iniciar sesión para obtener el primer refresh token.
 		AuthTokenResponse loginResponse = loginAndRead("manager@local.dev", "DevManager123!");
 		RefreshTokenRequest refreshRequest = new RefreshTokenRequest(loginResponse.refreshToken());
 		String refreshRequestJson = objectMapper.writeValueAsString(refreshRequest);
 
+		// ACT — canjear el token vigente por un par nuevo.
 		MvcResult refreshResult = mockMvc.perform(post("/api/auth/refresh")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content(refreshRequestJson))
@@ -107,6 +114,7 @@ class AuthControllerIntegrationTest {
 
 		String refreshResponseJson = refreshResult.getResponse().getContentAsString();
 		AuthTokenResponse refreshResponse = objectMapper.readValue(refreshResponseJson, AuthTokenResponse.class);
+		// ASSERT — el token se rota y el anterior deja de ser válido.
 		assertThat(refreshResponse.refreshToken()).isNotEqualTo(loginResponse.refreshToken());
 
 		mockMvc.perform(post("/api/auth/refresh")

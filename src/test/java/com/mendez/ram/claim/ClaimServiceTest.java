@@ -53,6 +53,7 @@ class ClaimServiceTest {
 
 	@BeforeEach
 	void setUp() {
+		// Inyectar mocks y un reloj fijo para resultados repetibles.
 		claimService = new ClaimService(
 				claimRepository,
 				authUserRepository,
@@ -63,6 +64,7 @@ class ClaimServiceTest {
 
 	@Test
 	void createsDraftClaimForAuthenticatedUser() {
+		// ARRANGE — el usuario autenticado es también el autor del claim.
 		AuthenticatedUser principal = principal(1L, Set.of("ROLE_USER"), Set.of("PERM_CLAIM_CREATE"));
 		AuthUser actor = authUser(1L, "dev-user");
 		when(authUserRepository.findById(1L)).thenReturn(Optional.of(actor));
@@ -73,8 +75,10 @@ class ClaimServiceTest {
 				"  Detailed claim description.  ",
 				"  Cliente Test  ");
 
+		// ACT — crear un borrador con campos que requieren limpieza.
 		var createdClaim = claimService.createClaim(createRequest, principal);
 
+		// ASSERT — se limpian los textos y se conserva autor y estado inicial.
 		assertThat(createdClaim.title()).isEqualTo("Missing invoice");
 		assertThat(createdClaim.description()).isEqualTo("Detailed claim description.");
 		assertThat(createdClaim.claimantName()).isEqualTo("Cliente Test");
@@ -85,6 +89,7 @@ class ClaimServiceTest {
 
 	@Test
 	void ownerCanSubmitDraftClaim() {
+		// ARRANGE — el claim pertenece al usuario que solicita el cambio.
 		AuthenticatedUser principal = principal(1L, Set.of("ROLE_USER"),
 				Set.of("PERM_CLAIM_READ", "PERM_CLAIM_UPDATE"));
 		AuthUser actor = authUser(1L, "dev-user");
@@ -94,8 +99,10 @@ class ClaimServiceTest {
 
 		ChangeClaimStatusRequest submitRequest = new ChangeClaimStatusRequest(ClaimStatus.REGISTERED, 0L);
 
+		// ACT — el propietario envía su borrador para registro.
 		var updatedClaim = claimService.updateClaimStatus(10L, submitRequest, principal);
 
+		// ASSERT — queda registrado y se sincroniza el estado persistido.
 		assertThat(updatedClaim.status()).isEqualTo(ClaimStatus.REGISTERED);
 		verify(claimRepository).flush();
 		verify(entityManager).refresh(claim);
@@ -103,6 +110,7 @@ class ClaimServiceTest {
 
 	@Test
 	void rejectsInvalidStatusTransitionWithConflict() {
+		// ARRANGE — un administrador intenta saltar desde borrador a aceptado.
 		AuthenticatedUser principal = principal(1L, Set.of("ROLE_ADMIN"),
 				Set.of("PERM_CLAIM_READ", "PERM_CLAIM_REVIEW"));
 		AuthUser actor = authUser(1L, "admin");
@@ -111,6 +119,7 @@ class ClaimServiceTest {
 
 		ChangeClaimStatusRequest invalidTransitionRequest = new ChangeClaimStatusRequest(ClaimStatus.ACCEPTED, 0L);
 
+		// ASSERT — una transición inválida se comunica como conflicto.
 		assertThatThrownBy(() -> claimService.updateClaimStatus(10L, invalidTransitionRequest, principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.CONFLICT));
@@ -118,6 +127,7 @@ class ClaimServiceTest {
 
 	@Test
 	void rejectsMissingClaimWithNotFound() {
+		// ARRANGE — el repositorio no encuentra el identificador solicitado.
 		AuthenticatedUser principal = principal(1L, Set.of("ROLE_ADMIN"), Set.of("PERM_CLAIM_READ"));
 		when(claimRepository.findWithUsersById(999L)).thenReturn(Optional.empty());
 
@@ -128,12 +138,14 @@ class ClaimServiceTest {
 
 	@Test
 	void userCannotUpdateAnotherUsersClaim() {
+		// ARRANGE — el actor y el propietario del claim son usuarios distintos.
 		AuthenticatedUser principal = principal(1L, Set.of("ROLE_USER"),
 				Set.of("PERM_CLAIM_READ", "PERM_CLAIM_UPDATE"));
 		Claim claim = new Claim("Draft", "Description", null, authUser(2L, "other-user"), NOW);
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
 		UpdateClaimRequest updateRequest = new UpdateClaimRequest("New title", "New description", null, 0L);
 
+		// ASSERT — el recurso ajeno se oculta como no encontrado.
 		assertThatThrownBy(() -> claimService.updateClaim(10L, updateRequest, principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
@@ -141,6 +153,7 @@ class ClaimServiceTest {
 
 	@Test
 	void finalClaimCannotBeUpdated() {
+		// ARRANGE — llevar el claim hasta un estado final antes de editar.
 		AuthenticatedUser principal = principal(1L, Set.of("ROLE_MANAGER"),
 				Set.of("PERM_CLAIM_READ", "PERM_CLAIM_UPDATE", "PERM_CLAIM_REVIEW"));
 		AuthUser actor = authUser(1L, "manager");
@@ -151,6 +164,7 @@ class ClaimServiceTest {
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
 		UpdateClaimRequest updateRequest = new UpdateClaimRequest("New title", "New description", null, 0L);
 
+		// ASSERT — los cambios sobre un claim final devuelven conflicto.
 		assertThatThrownBy(() -> claimService.updateClaim(10L, updateRequest, principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.CONFLICT));
@@ -158,6 +172,7 @@ class ClaimServiceTest {
 
 	@Test
 	void disabledReviewerCannotBeAssigned() {
+		// ARRANGE — intentar asignar un usuario deshabilitado como revisor.
 		AuthenticatedUser principal = principal(1L, Set.of("ROLE_MANAGER"), Set.of("PERM_CLAIM_REVIEW"));
 		AuthUser actor = authUser(1L, "manager");
 		AuthUser disabledReviewer = authUser(2L, "disabled-manager");
@@ -169,6 +184,7 @@ class ClaimServiceTest {
 
 		AssignClaimRequest assignmentRequest = new AssignClaimRequest(2L, 0L);
 
+		// ASSERT — se informa el código específico de asignación inválida.
 		assertThatThrownBy(() -> claimService.assignClaim(10L, assignmentRequest, principal))
 				.isInstanceOfSatisfying(ApiException.class, exception -> {
 					assertThat(exception.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);

@@ -23,8 +23,10 @@ class UserRepositoryIntegrationTest {
 
 	@Test
 	void savesAndFindsUserByUsername() {
+		// ARRANGE — guardar un usuario real en la base de datos de test.
 		userRepository.save(new User("local-user"));
 
+		// ASSERT — la búsqueda devuelve el usuario por su nombre.
 		assertThat(userRepository.findByUsername("local-user"))
 				.isPresent()
 				.get()
