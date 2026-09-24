@@ -46,6 +46,7 @@ public class AuthenticatedUser implements UserDetails {
 
 		for (SecurityRole role : user.getRoles()) {
 			roles.add(role.getCode());
+
 			for (SecurityPermission permission : role.getPermissions()) {
 				permissions.add(permission.getCode());
 			}
@@ -124,8 +125,14 @@ public class AuthenticatedUser implements UserDetails {
 
 	private static List<GrantedAuthority> buildAuthorities(Set<String> roles, Set<String> permissions) {
 		List<GrantedAuthority> authorities = new ArrayList<>();
-		roles.stream().map(SimpleGrantedAuthority::new).forEach(authorities::add);
-		permissions.stream().map(SimpleGrantedAuthority::new).forEach(authorities::add);
+		for (String roleCode : roles) {
+			authorities.add(new SimpleGrantedAuthority(roleCode));
+		}
+
+		for (String permissionCode : permissions) {
+			authorities.add(new SimpleGrantedAuthority(permissionCode));
+		}
+
 		return List.copyOf(authorities);
 	}
 }

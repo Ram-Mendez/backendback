@@ -18,6 +18,8 @@ export class AuthService {
 
   private readonly accessTokenState = signal<string | null>(this.readStorage(ACCESS_TOKEN_KEY));
   private readonly refreshTokenState = signal<string | null>(this.readStorage(REFRESH_TOKEN_KEY));
+  private readonly sessionExpiredState = signal(false);
+  readonly sessionExpired = this.sessionExpiredState.asReadonly();
   readonly user = signal<UserProfile | null>(this.readUser());
   readonly isAuthenticated = computed(() => Boolean(this.accessTokenState() && this.user()));
 
@@ -87,6 +89,7 @@ export class AuthService {
   }
 
   clearSession(): void {
+    this.sessionExpiredState.set(false);
     this.accessTokenState.set(null);
     this.refreshTokenState.set(null);
     this.user.set(null);
@@ -95,7 +98,19 @@ export class AuthService {
     this.removeStorage(USER_KEY);
   }
 
+  expireSession(): boolean {
+    const hasSession = Boolean(this.accessTokenState() || this.refreshTokenState() || this.user());
+    if (!hasSession) {
+      return false;
+    }
+
+    this.clearSession();
+    this.sessionExpiredState.set(true);
+    return true;
+  }
+
   private storeSession(response: AuthTokenResponse): void {
+    this.sessionExpiredState.set(false);
     this.accessTokenState.set(response.accessToken);
     this.refreshTokenState.set(response.refreshToken);
     this.user.set(response.user);

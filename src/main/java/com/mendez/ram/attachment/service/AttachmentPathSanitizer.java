@@ -23,17 +23,22 @@ public class AttachmentPathSanitizer {
 			"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9");
 
 	public SanitizedAttachmentPath sanitize(String submittedRelativePath, String submittedFilename) {
-		String submittedPathCandidate = hasText(submittedRelativePath) ? submittedRelativePath : submittedFilename;
+		String submittedPathCandidate = submittedFilename;
+		if (hasText(submittedRelativePath)) {
+			submittedPathCandidate = submittedRelativePath;
+		}
+
 		if (!hasText(submittedPathCandidate)) {
 			throw invalidAttachmentPath();
 		}
 
-		String normalizedPath = Normalizer.normalize(
-				submittedPathCandidate.trim().replace('\\', '/'),
-				Normalizer.Form.NFKC);
-		if (normalizedPath.startsWith("/") || normalizedPath.startsWith("~")
-				|| WINDOWS_ABSOLUTE_PATH.matcher(normalizedPath).matches()
-				|| CONTROL_CHARS.matcher(normalizedPath).find()) {
+		String pathWithNormalizedSeparators = submittedPathCandidate.trim().replace('\\', '/');
+		String normalizedPath = Normalizer.normalize(pathWithNormalizedSeparators, Normalizer.Form.NFKC);
+
+		if (isAbsoluteOrHomeRelativePath(normalizedPath)) {
+			throw invalidAttachmentPath();
+		}
+		if (CONTROL_CHARS.matcher(normalizedPath).find()) {
 			throw invalidAttachmentPath();
 		}
 
@@ -43,10 +48,12 @@ public class AttachmentPathSanitizer {
 			if (!hasText(pathSegment) || ".".equals(pathSegment) || "..".equals(pathSegment)) {
 				throw invalidAttachmentPath();
 			}
+
 			String sanitizedSegment = sanitizeSegment(pathSegment);
 			if (sanitizedPathBuilder.length() > 0) {
 				sanitizedPathBuilder.append('/');
 			}
+
 			sanitizedPathBuilder.append(sanitizedSegment);
 		}
 
@@ -57,13 +64,21 @@ public class AttachmentPathSanitizer {
 		String relativePath = sanitizedPathBuilder.toString();
 		int separatorIndex = relativePath.lastIndexOf('/');
 		String fileName = separatorIndex >= 0 ? relativePath.substring(separatorIndex + 1) : relativePath;
+
 		return new SanitizedAttachmentPath(fileName, relativePath);
+	}
+
+	private static boolean isAbsoluteOrHomeRelativePath(String normalizedPath) {
+		return normalizedPath.startsWith("/")
+				|| normalizedPath.startsWith("~")
+				|| WINDOWS_ABSOLUTE_PATH.matcher(normalizedPath).matches();
 	}
 
 	private String sanitizeSegment(String segment) {
 		String sanitized = FORBIDDEN_FILENAME_CHARS.matcher(segment).replaceAll("_");
 		sanitized = sanitized.replaceAll("\\s+", " ").trim();
 		sanitized = trimTrailingDotsAndSpaces(sanitized);
+
 		if (sanitized.isBlank()) {
 			sanitized = "file";
 		}
@@ -71,14 +86,17 @@ public class AttachmentPathSanitizer {
 			sanitized = sanitized.substring(0, MAX_SEGMENT_LENGTH);
 			sanitized = trimTrailingDotsAndSpaces(sanitized);
 		}
+
 		String baseName = sanitized;
 		int dotIndex = sanitized.indexOf('.');
 		if (dotIndex >= 0) {
 			baseName = sanitized.substring(0, dotIndex);
 		}
+
 		if (WINDOWS_RESERVED_NAMES.contains(baseName.toUpperCase(Locale.ROOT))) {
 			sanitized = appendReservedNameSuffix(sanitized);
 		}
+
 		return sanitized;
 	}
 
@@ -87,6 +105,7 @@ public class AttachmentPathSanitizer {
 		if (dotIndex > 0) {
 			return fileName.substring(0, dotIndex) + "_" + fileName.substring(dotIndex);
 		}
+
 		return fileName + "_";
 	}
 
@@ -97,8 +116,10 @@ public class AttachmentPathSanitizer {
 			if (trailingCharacter != '.' && trailingCharacter != ' ') {
 				break;
 			}
+
 			trimmedEndIndex--;
 		}
+
 		return fileNameSegment.substring(0, trimmedEndIndex);
 	}
 

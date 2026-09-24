@@ -36,6 +36,7 @@ public class JwtService {
 		this.objectMapper = objectMapper;
 		this.clock = clock;
 		this.secret = properties.getJwtSecret().getBytes(StandardCharsets.UTF_8);
+
 		if (this.secret.length < 32) {
 			throw new IllegalStateException("app.security.jwt-secret must contain at least 32 bytes");
 		}
@@ -61,6 +62,7 @@ public class JwtService {
 		payload.put("exp", expiresAt.getEpochSecond());
 
 		String unsignedToken = encodeJson(header) + "." + encodeJson(payload);
+
 		return unsignedToken + "." + sign(unsignedToken);
 	}
 
@@ -71,8 +73,10 @@ public class JwtService {
 		}
 
 		String unsignedToken = parts[0] + "." + parts[1];
-		if (!MessageDigest.isEqual(sign(unsignedToken).getBytes(StandardCharsets.UTF_8),
-				parts[2].getBytes(StandardCharsets.UTF_8))) {
+		byte[] expectedSignatureBytes = sign(unsignedToken).getBytes(StandardCharsets.UTF_8);
+		byte[] receivedSignatureBytes = parts[2].getBytes(StandardCharsets.UTF_8);
+		boolean signatureMatches = MessageDigest.isEqual(expectedSignatureBytes, receivedSignatureBytes);
+		if (!signatureMatches) {
 			throw new JwtValidationException("Invalid JWT signature");
 		}
 
@@ -86,27 +90,34 @@ public class JwtService {
 			throw new JwtValidationException("Invalid token type");
 		}
 
-		Instant expiresAt = Instant.ofEpochSecond(asLong(payload.get("exp"), "exp"));
+		long expirationEpochSeconds = asLong(payload.get("exp"), "exp");
+		Instant expiresAt = Instant.ofEpochSecond(expirationEpochSeconds);
 		if (!expiresAt.isAfter(Instant.now(clock))) {
 			throw new JwtValidationException("JWT is expired");
 		}
 
-		return new JwtClaims(asUserId(payload.get("sub")), String.valueOf(payload.get("email")), expiresAt);
+		Long authenticatedUserId = asUserId(payload.get("sub"));
+		String email = String.valueOf(payload.get("email"));
+
+		return new JwtClaims(authenticatedUserId, email, expiresAt);
 	}
 
-	private String encodeJson(Map<String, Object> value) {
+	private String encodeJson(Map<String, Object> tokenSection) {
 		try {
-			return BASE64_URL_ENCODER.encodeToString(objectMapper.writeValueAsBytes(value));
+			byte[] jsonBytes = objectMapper.writeValueAsBytes(tokenSection);
+
+			return BASE64_URL_ENCODER.encodeToString(jsonBytes);
 		}
 		catch (Exception exception) {
 			throw new JwtValidationException("Could not encode JWT", exception);
 		}
 	}
 
-	private Map<String, Object> decodeJson(String value) {
+	private Map<String, Object> decodeJson(String encodedTokenSection) {
 		try {
-			byte[] decoded = BASE64_URL_DECODER.decode(value);
-			return objectMapper.readValue(decoded, new TypeReference<>() {
+			byte[] jsonBytes = BASE64_URL_DECODER.decode(encodedTokenSection);
+
+			return objectMapper.readValue(jsonBytes, new TypeReference<>() {
 			});
 		}
 		catch (Exception exception) {
@@ -114,11 +125,15 @@ public class JwtService {
 		}
 	}
 
-	private String sign(String value) {
+	private String sign(String unsignedToken) {
 		try {
 			Mac mac = Mac.getInstance(ALGORITHM);
 			mac.init(new SecretKeySpec(secret, ALGORITHM));
-			return BASE64_URL_ENCODER.encodeToString(mac.doFinal(value.getBytes(StandardCharsets.UTF_8)));
+
+			byte[] unsignedTokenBytes = unsignedToken.getBytes(StandardCharsets.UTF_8);
+			byte[] signatureBytes = mac.doFinal(unsignedTokenBytes);
+
+			return BASE64_URL_ENCODER.encodeToString(signatureBytes);
 		}
 		catch (Exception exception) {
 			throw new JwtValidationException("Could not sign JWT", exception);
@@ -129,6 +144,7 @@ public class JwtService {
 		if (value instanceof Number number) {
 			return number.longValue();
 		}
+
 		throw new JwtValidationException("JWT claim is missing or invalid: " + fieldName);
 	}
 
@@ -136,8 +152,10 @@ public class JwtService {
 		if (value == null) {
 			throw new JwtValidationException("JWT claim is missing or invalid: sub");
 		}
+
 		try {
-			return Long.valueOf(String.valueOf(value));
+			String userIdText = String.valueOf(value);
+			return Long.valueOf(userIdText);
 		}
 		catch (NumberFormatException exception) {
 			throw new JwtValidationException("JWT claim is missing or invalid: sub", exception);

@@ -75,6 +75,7 @@ public class AttachmentService {
 	@Transactional(readOnly = true)
 	public List<AttachmentResponse> findClaimAttachments(Long claimId, AuthenticatedUser principal) {
 		claimService.findViewableClaim(claimId, principal);
+
 		return claimAttachmentRepository.findByClaimIdOrderByRelativePathAscCreatedAtAsc(claimId)
 				.stream()
 				.map(attachmentMapper::toAttachmentResponse)
@@ -84,6 +85,7 @@ public class AttachmentService {
 	@Transactional(readOnly = true)
 	public AttachmentCapabilitiesResponse loadClaimAttachmentCapabilities(Long claimId, AuthenticatedUser principal) {
 		claimService.findViewableClaim(claimId, principal);
+
 		return new AttachmentCapabilitiesResponse(
 				attachmentProperties.getMaxFileSize().toBytes(),
 				attachmentProperties.getMaxRequestSize().toBytes(),
@@ -95,28 +97,39 @@ public class AttachmentService {
 			List<String> relativePaths,
 			AuthenticatedUser principal) {
 		ensureValidAttachmentUploadRequest(attachmentFiles, relativePaths);
+
 		Claim claim = claimService.findEditableClaimWithLock(claimId, principal);
 		AuthUser actingUser = findAuthenticatedUser(principal);
+
 		List<String> storedStorageKeys = new ArrayList<>();
 		registerUploadRollbackCleanup(claimId, List.copyOf(storedStorageKeys));
+
 		Set<String> usedRelativePaths = claimAttachmentRepository.findByClaimIdOrderByRelativePathAscCreatedAtAsc(claimId)
 				.stream()
 				.map(ClaimAttachment::getRelativePath)
 				.collect(Collectors.toCollection(HashSet::new));
 		List<AttachmentResponse> uploadedAttachments = new ArrayList<>();
+
 		try {
 			for (int index = 0; index < attachmentFiles.size(); index++) {
 				MultipartFile attachmentFile = attachmentFiles.get(index);
-				String submittedRelativePath = relativePaths == null ? null : relativePaths.get(index);
-				uploadedAttachments.add(uploadSingleClaimAttachment(
+				String submittedRelativePath = null;
+				if (relativePaths != null) {
+					submittedRelativePath = relativePaths.get(index);
+				}
+
+				AttachmentResponse uploadedAttachment = uploadSingleClaimAttachment(
 						claim,
 						actingUser,
 						attachmentFile,
 						submittedRelativePath,
 						usedRelativePaths,
-						storedStorageKeys));
+						storedStorageKeys);
+				uploadedAttachments.add(uploadedAttachment);
 			}
+
 			claimAttachmentRepository.flush();
+
 			return uploadedAttachments;
 		}
 		catch (DataIntegrityViolationException exception) {
@@ -127,11 +140,20 @@ public class AttachmentService {
 	}
 
 	@Transactional(readOnly = true)
-	public AttachmentDownload downloadClaimAttachment(Long claimId, UUID attachmentId, AuthenticatedUser principal) {
+	public AttachmentDownload downloadClaimAttachment(
+			Long claimId,
+			UUID attachmentId,
+			AuthenticatedUser principal) {
 		claimService.findViewableClaim(claimId, principal);
-		ClaimAttachment attachment = findAttachmentById(attachmentId);
-		StoredAttachmentResource storedResource = attachmentStorage.load(attachment.getStorageKey());
+
+		ClaimAttachment attachment =
+				findAttachmentByClaimAndId(claimId, attachmentId);
+
+		StoredAttachmentResource storedResource =
+				attachmentStorage.load(attachment.getStorageKey());
+
 		LOGGER.info("Attachment {} downloaded from claim {} by user {}", attachmentId, claimId, principal.id());
+
 		return new AttachmentDownload(attachment, storedResource.inputStream(), storedResource.sizeBytes());
 	}
 
@@ -141,11 +163,18 @@ public class AttachmentService {
 		ClaimAttachment attachment = findAttachmentByClaimAndId(claimId, attachmentId);
 		AuthUser actingUser = findAuthenticatedUser(principal);
 		String storageKey = attachment.getStorageKey();
+
 		claimAttachmentRepository.delete(attachment);
 		claimAttachmentRepository.flush();
+
 		claimService.recordClaimAttachmentEvent(
-				claim, actingUser, ClaimHistoryEventType.ATTACHMENT_DELETED, "attachmentId=" + attachmentId);
+				claim,
+				actingUser,
+				ClaimHistoryEventType.ATTACHMENT_DELETED,
+				"attachmentId=" + attachmentId);
+
 		deleteStorageAfterCommit(storageKey, attachment.getId(), claimId);
+
 		LOGGER.info("Attachment {} deleted from claim {} by user {}", attachment.getId(), claimId, principal.id());
 	}
 
@@ -156,12 +185,14 @@ public class AttachmentService {
 			String submittedRelativePath,
 			Set<String> usedRelativePaths, List<String> storedStorageKeys) {
 		ensureAttachmentFileIsValid(attachmentFile);
+
 		SanitizedAttachmentPath sanitizedPath = pathSanitizer.sanitize(
 				submittedRelativePath,
 				attachmentFile.getOriginalFilename());
 		String relativePath = generateUniqueRelativePath(sanitizedPath.relativePath(), usedRelativePaths);
 		String fileName = fileNameFromRelativePath(relativePath);
 		String contentType = resolveAttachmentContentType(attachmentFile, fileName);
+
 		ClaimAttachment storedClaimAttachment = createStoredClaimAttachment(
 				claim,
 				actingUser,
@@ -174,10 +205,13 @@ public class AttachmentService {
 				claim,
 				actingUser,
 				storedClaimAttachment);
+
 		usedRelativePaths.add(relativePath);
+
 		LOGGER.info("Attachment {} uploaded to claim {} by user {} path={} sizeBytes={}",
 				savedAttachment.getId(), claim.getId(), actingUser.getId(), savedAttachment.getRelativePath(),
 				savedAttachment.getSizeBytes());
+
 		return attachmentMapper.toAttachmentResponse(savedAttachment);
 	}
 
@@ -191,8 +225,10 @@ public class AttachmentService {
 			List<String> storedStorageKeys) {
 		UUID attachmentId = UUID.randomUUID();
 		String storageKey = "claims/" + claim.getId() + "/" + attachmentId + "/" + fileName;
+
 		StoredAttachment storedAttachment = storeAttachmentFile(storageKey, attachmentFile);
 		storedStorageKeys.add(storageKey);
+
 		return new ClaimAttachment(
 				attachmentId,
 				claim,
@@ -211,19 +247,24 @@ public class AttachmentService {
 			AuthUser actingUser,
 			ClaimAttachment claimAttachment) {
 		ClaimAttachment savedAttachment = claimAttachmentRepository.save(claimAttachment);
+
 		String attachmentHistoryData = "attachmentId=" + savedAttachment.getId()
 				+ ",path=" + savedAttachment.getRelativePath();
+
 		claimService.recordClaimAttachmentEvent(
 				claim,
 				actingUser,
 				ClaimHistoryEventType.ATTACHMENT_UPLOADED,
 				attachmentHistoryData);
+
 		return savedAttachment;
 	}
 
 	private StoredAttachment storeAttachmentFile(String storageKey, MultipartFile file) {
 		try {
-			return attachmentStorage.store(new StoreAttachmentCommand(storageKey, file.getInputStream()));
+			StoreAttachmentCommand storageCommand = new StoreAttachmentCommand(storageKey, file.getInputStream());
+
+			return attachmentStorage.store(storageCommand);
 		}
 		catch (IOException exception) {
 			LOGGER.error("Multipart stream could not be opened filename={}", file.getOriginalFilename(), exception);
@@ -257,20 +298,24 @@ public class AttachmentService {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "ATTACHMENT_REQUIRED",
 					"Debes adjuntar al menos un archivo.");
 		}
+
 		if (attachmentFiles.size() > attachmentProperties.getMaxFilesPerRequest()) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "ATTACHMENT_LIMIT_EXCEEDED",
 					"Demasiados archivos adjuntos en una unica solicitud.");
 		}
+
 		if (relativePaths != null && relativePaths.size() != attachmentFiles.size()) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ATTACHMENT_PATH",
 					"Cada archivo debe incluir una ruta relativa.");
 		}
+
 		long totalSizeBytes = 0;
 		for (MultipartFile attachmentFile : attachmentFiles) {
 			if (attachmentFile != null) {
 				totalSizeBytes += attachmentFile.getSize();
 			}
 		}
+
 		if (totalSizeBytes > attachmentProperties.getMaxRequestSize().toBytes()) {
 			throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "ATTACHMENT_REQUEST_TOO_LARGE",
 					"El conjunto de adjuntos supera el tamano maximo permitido.");
@@ -278,19 +323,33 @@ public class AttachmentService {
 	}
 
 	private void ensureAttachmentFileIsValid(MultipartFile file) {
-		if (file == null || (file.isEmpty() && !StringUtils.hasText(file.getOriginalFilename()))) {
+		if (isMissingAttachmentFile(file)) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "ATTACHMENT_REQUIRED",
 					"Debes adjuntar al menos un archivo valido.");
 		}
+
 		if (file.getSize() > attachmentProperties.getMaxFileSize().toBytes()) {
 			throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "ATTACHMENT_FILE_TOO_LARGE",
 					"El archivo adjunto supera el tamano maximo permitido.");
 		}
 	}
 
+	private static boolean isMissingAttachmentFile(MultipartFile file) {
+		if (file == null) {
+			return true;
+		}
+
+		if (!file.isEmpty()) {
+			return false;
+		}
+
+		return !StringUtils.hasText(file.getOriginalFilename());
+	}
+
 	private String resolveAttachmentContentType(MultipartFile file, String fileName) {
 		byte[] contentSignatureBytes = readAttachmentSignature(file);
 		ensureKnownContentSignatureMatches(fileName, contentSignatureBytes);
+
 		return normalizeAttachmentContentType(file.getContentType());
 	}
 
@@ -299,6 +358,7 @@ public class AttachmentService {
 		if (!requiresKnownContentSignature(fileExtension)) {
 			return;
 		}
+
 		ContentSignature contentSignature = detectContentSignature(contentSignatureBytes);
 		if (!contentSignatureMatchesExtension(fileExtension, contentSignature)) {
 			throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "ATTACHMENT_TYPE_NOT_ALLOWED",
@@ -379,6 +439,7 @@ public class AttachmentService {
 			deleteAttachmentStorageSafely(storageKey, attachmentId, claimId);
 			return;
 		}
+
 		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
 			@Override
 			public void afterCommit() {
@@ -402,6 +463,7 @@ public class AttachmentService {
 		while (rootCause.getCause() != null) {
 			rootCause = rootCause.getCause();
 		}
+
 		return rootCause.getClass().getSimpleName() + ": " + rootCause.getMessage();
 	}
 
@@ -409,6 +471,7 @@ public class AttachmentService {
 		if (!usedRelativePaths.contains(relativePath)) {
 			return relativePath;
 		}
+
 		String directory = "";
 		String fileName = relativePath;
 		int slashIndex = relativePath.lastIndexOf('/');
@@ -416,6 +479,7 @@ public class AttachmentService {
 			directory = relativePath.substring(0, slashIndex + 1);
 			fileName = relativePath.substring(slashIndex + 1);
 		}
+
 		String baseName = fileName;
 		String extension = "";
 		int dotIndex = fileName.lastIndexOf('.');
@@ -423,6 +487,7 @@ public class AttachmentService {
 			baseName = fileName.substring(0, dotIndex);
 			extension = fileName.substring(dotIndex);
 		}
+
 		int suffix = 1;
 		String candidateRelativePath;
 		do {
@@ -430,6 +495,7 @@ public class AttachmentService {
 			suffix++;
 		}
 		while (usedRelativePaths.contains(candidateRelativePath));
+
 		return candidateRelativePath;
 	}
 
@@ -437,66 +503,104 @@ public class AttachmentService {
 		if (bytesStartWith(contentBytes, "%PDF-".getBytes(StandardCharsets.US_ASCII))) {
 			return ContentSignature.PDF;
 		}
+
 		if (bytesStartWith(contentBytes, new byte[] {
 				(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A })) {
 			return ContentSignature.PNG;
 		}
-		if (contentBytes.length >= 3
-				&& (contentBytes[0] & 0xFF) == 0xFF
-				&& (contentBytes[1] & 0xFF) == 0xD8
-				&& (contentBytes[2] & 0xFF) == 0xFF) {
+
+		if (hasJpegSignature(contentBytes)) {
 			return ContentSignature.JPEG;
 		}
+
 		if (bytesStartWith(contentBytes, "GIF87a".getBytes(StandardCharsets.US_ASCII))
 				|| bytesStartWith(contentBytes, "GIF89a".getBytes(StandardCharsets.US_ASCII))) {
 			return ContentSignature.GIF;
 		}
-		if (bytesStartWith(contentBytes, "RIFF".getBytes(StandardCharsets.US_ASCII))
-				&& contentBytes.length >= 12
-				&& contentBytes[8] == 'W'
-				&& contentBytes[9] == 'E'
-				&& contentBytes[10] == 'B'
-				&& contentBytes[11] == 'P') {
+
+		if (hasWebpSignature(contentBytes)) {
 			return ContentSignature.WEBP;
 		}
+
 		if (hasZipSignature(contentBytes)) {
 			return ContentSignature.ZIP;
 		}
+
 		if (bytesStartWith(contentBytes, new byte[] {
 				(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0, (byte) 0xA1, (byte) 0xB1, 0x1A,
 				(byte) 0xE1 })) {
 			return ContentSignature.OLE_COMPOUND;
 		}
+
 		if (bytesStartWith(contentBytes, new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00 })
 				|| bytesStartWith(contentBytes, new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00 })) {
 			return ContentSignature.RAR;
 		}
+
 		if (bytesStartWith(contentBytes, new byte[] { 0x37, 0x7A, (byte) 0xBC, (byte) 0xAF, 0x27, 0x1C })) {
 			return ContentSignature.SEVEN_Z;
 		}
+
 		if (bytesStartWith(contentBytes, new byte[] { 0x1F, (byte) 0x8B })) {
 			return ContentSignature.GZIP;
 		}
-		if (contentBytes.length >= 263
-				&& contentBytes[257] == 'u'
+
+		if (hasTarSignature(contentBytes)) {
+			return ContentSignature.TAR;
+		}
+
+		return ContentSignature.UNKNOWN;
+	}
+
+	private static boolean hasJpegSignature(byte[] contentBytes) {
+		if (contentBytes.length < 3) {
+			return false;
+		}
+
+		return (contentBytes[0] & 0xFF) == 0xFF
+				&& (contentBytes[1] & 0xFF) == 0xD8
+				&& (contentBytes[2] & 0xFF) == 0xFF;
+	}
+
+	private static boolean hasWebpSignature(byte[] contentBytes) {
+		boolean hasRiffHeader = bytesStartWith(contentBytes, "RIFF".getBytes(StandardCharsets.US_ASCII));
+		if (!hasRiffHeader) {
+			return false;
+		}
+
+		if (contentBytes.length < 12) {
+			return false;
+		}
+
+		return contentBytes[8] == 'W'
+				&& contentBytes[9] == 'E'
+				&& contentBytes[10] == 'B'
+				&& contentBytes[11] == 'P';
+	}
+
+	private static boolean hasTarSignature(byte[] contentBytes) {
+		if (contentBytes.length < 263) {
+			return false;
+		}
+
+		return contentBytes[257] == 'u'
 				&& contentBytes[258] == 's'
 				&& contentBytes[259] == 't'
 				&& contentBytes[260] == 'a'
-				&& contentBytes[261] == 'r') {
-			return ContentSignature.TAR;
-		}
-		return ContentSignature.UNKNOWN;
+				&& contentBytes[261] == 'r';
 	}
 
 	private static boolean bytesStartWith(byte[] contentBytes, byte[] expectedPrefix) {
 		if (contentBytes.length < expectedPrefix.length) {
 			return false;
 		}
+
 		for (int index = 0; index < expectedPrefix.length; index++) {
 			if (contentBytes[index] != expectedPrefix[index]) {
 				return false;
 			}
 		}
+
 		return true;
 	}
 
@@ -510,12 +614,18 @@ public class AttachmentService {
 		if (!StringUtils.hasText(contentType)) {
 			return DEFAULT_CONTENT_TYPE;
 		}
+
 		int separatorIndex = contentType.indexOf(';');
-		String normalizedContentType = separatorIndex >= 0 ? contentType.substring(0, separatorIndex) : contentType;
-		normalizedContentType = normalizedContentType.trim().toLowerCase(Locale.ROOT);
+		String contentTypeWithoutParameters = contentType;
+		if (separatorIndex >= 0) {
+			contentTypeWithoutParameters = contentType.substring(0, separatorIndex);
+		}
+
+		String normalizedContentType = contentTypeWithoutParameters.trim().toLowerCase(Locale.ROOT);
 		if (normalizedContentType.isBlank() || normalizedContentType.length() > 255) {
 			return DEFAULT_CONTENT_TYPE;
 		}
+
 		try {
 			MediaType.parseMediaType(normalizedContentType);
 			return normalizedContentType;
@@ -527,7 +637,11 @@ public class AttachmentService {
 
 	private static String fileNameFromRelativePath(String relativePath) {
 		int separatorIndex = relativePath.lastIndexOf('/');
-		return separatorIndex >= 0 ? relativePath.substring(separatorIndex + 1) : relativePath;
+		if (separatorIndex < 0) {
+			return relativePath;
+		}
+
+		return relativePath.substring(separatorIndex + 1);
 	}
 
 	private static String fileExtension(String fileName) {
@@ -535,6 +649,7 @@ public class AttachmentService {
 		if (dotIndex < 1 || dotIndex == fileName.length() - 1) {
 			return "";
 		}
+
 		return fileName.substring(dotIndex + 1).toLowerCase(Locale.ROOT);
 	}
 

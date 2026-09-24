@@ -71,24 +71,23 @@ class ClaimControllerIntegrationTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.reference").value(reference));
 
+		UpdateClaimRequest updateRequest = new UpdateClaimRequest(
+				"Owner draft updated",
+				"Updated description for own draft.",
+				"Cliente Test",
+				version);
+		String updateRequestJson = objectMapper.writeValueAsString(updateRequest);
+
 		MvcResult updatedClaimResult = mockMvc.perform(put("/api/v1/claims/" + claimId)
 						.header(HttpHeaders.AUTHORIZATION, bearer(userToken))
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(objectMapper.writeValueAsString(new UpdateClaimRequest(
-								"Owner draft updated",
-								"Updated description for own draft.",
-								"Cliente Test",
-								version))))
+						.content(updateRequestJson))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.title").value("Owner draft updated"))
 				.andReturn();
 		version = extractLong(updatedClaimResult, "version");
 
-		mockMvc.perform(patch("/api/v1/claims/" + claimId + "/status")
-						.header(HttpHeaders.AUTHORIZATION, bearer(userToken))
-						.contentType(MediaType.APPLICATION_JSON)
-						.content(objectMapper.writeValueAsString(
-								new ChangeClaimStatusRequest(ClaimStatus.REGISTERED, version))))
+		changeStatus(userToken, claimId, ClaimStatus.REGISTERED, version)
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.status").value("REGISTERED"));
 	}
@@ -102,20 +101,12 @@ class ClaimControllerIntegrationTest {
 		Long claimId = extractClaimId(createdClaimResult);
 		Long version = extractLong(createdClaimResult, "version");
 
-		MvcResult registered = mockMvc.perform(patch("/api/v1/claims/" + claimId + "/status")
-						.header(HttpHeaders.AUTHORIZATION, bearer(userToken))
-						.contentType(MediaType.APPLICATION_JSON)
-						.content(objectMapper.writeValueAsString(
-								new ChangeClaimStatusRequest(ClaimStatus.REGISTERED, version))))
+		MvcResult registered = changeStatus(userToken, claimId, ClaimStatus.REGISTERED, version)
 				.andExpect(status().isOk())
 				.andReturn();
 		version = extractLong(registered, "version");
 
-		mockMvc.perform(patch("/api/v1/claims/" + claimId + "/status")
-						.header(HttpHeaders.AUTHORIZATION, bearer(userToken))
-						.contentType(MediaType.APPLICATION_JSON)
-						.content(objectMapper.writeValueAsString(
-								new ChangeClaimStatusRequest(ClaimStatus.UNDER_REVIEW, version))))
+		changeStatus(userToken, claimId, ClaimStatus.UNDER_REVIEW, version)
 				.andExpect(status().isForbidden())
 				.andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
 	}
@@ -146,15 +137,17 @@ class ClaimControllerIntegrationTest {
 				.andExpect(jsonPath("$.status").value("ACCEPTED"))
 				.andReturn();
 		version = extractLong(accepted, "version");
+		UpdateClaimRequest updateRequest = new UpdateClaimRequest(
+				"Should fail",
+				"Final claims are not editable.",
+				null,
+				version);
+		String updateRequestJson = objectMapper.writeValueAsString(updateRequest);
 
 		mockMvc.perform(put("/api/v1/claims/" + claimId)
 						.header(HttpHeaders.AUTHORIZATION, bearer(managerToken))
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(objectMapper.writeValueAsString(new UpdateClaimRequest(
-								"Should fail",
-								"Final claims are not editable.",
-								null,
-								version))))
+						.content(updateRequestJson))
 				.andExpect(status().isConflict())
 				.andExpect(jsonPath("$.code").value("CLAIM_NOT_EDITABLE"));
 	}
@@ -207,10 +200,18 @@ class ClaimControllerIntegrationTest {
 				.andExpect(jsonPath("$.assignedToId").value(reviewer.id()))
 				.andReturn();
 		claimVersion = extractLong(assignedClaimResult, "version");
+		String updateRequestJson = """
+				{
+				  "title": "Workflow edited",
+				  "description": "Backend workflow",
+				  "priority": "HIGH",
+				  "version": %s
+				}
+				""".formatted(claimVersion);
 		MvcResult editedClaimResult = mockMvc.perform(put("/api/v1/claims/" + claimId)
 						.header(HttpHeaders.AUTHORIZATION, bearer(managerAccessToken))
 						.contentType(MediaType.APPLICATION_JSON)
-						.content("{\"title\":\"Workflow edited\",\"description\":\"Backend workflow\",\"priority\":\"HIGH\",\"version\":" + claimVersion + "}"))
+						.content(updateRequestJson))
 				.andExpect(status().isOk())
 				.andReturn();
 		claimVersion = extractLong(editedClaimResult, "version");
@@ -280,11 +281,17 @@ class ClaimControllerIntegrationTest {
 		Long disabledUserId = jdbcTemplate.queryForObject(
 				"select id from auth_user where email = 'disabled@local.dev'",
 				Long.class);
+		String assignmentRequestJson = """
+				{
+				  "assignedToId": %s,
+				  "version": %s
+				}
+				""".formatted(disabledUserId, claimVersion);
 
 		mockMvc.perform(patch("/api/v1/claims/" + claimId + "/assignment")
 						.header(HttpHeaders.AUTHORIZATION, bearer(managerAccessToken))
 						.contentType(MediaType.APPLICATION_JSON)
-						.content("{\"assignedToId\":" + disabledUserId + ",\"version\":" + claimVersion + "}"))
+						.content(assignmentRequestJson))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("INVALID_ASSIGNEE"));
 	}
@@ -308,21 +315,25 @@ class ClaimControllerIntegrationTest {
 	}
 
 	private org.springframework.test.web.servlet.ResultActions createClaim(String token, String title) throws Exception {
+		CreateClaimRequest createRequest = new CreateClaimRequest(
+				title,
+				"Reclamacion generada por test de integracion.",
+				"Cliente Test");
+		String createRequestJson = objectMapper.writeValueAsString(createRequest);
 		return mockMvc.perform(post("/api/v1/claims")
 				.header(HttpHeaders.AUTHORIZATION, bearer(token))
 				.contentType(MediaType.APPLICATION_JSON)
-				.content(objectMapper.writeValueAsString(new CreateClaimRequest(
-						title,
-						"Reclamacion generada por test de integracion.",
-						"Cliente Test"))));
+				.content(createRequestJson));
 	}
 
-	private org.springframework.test.web.servlet.ResultActions changeStatus(String token, Long claimId, ClaimStatus status,
+	private org.springframework.test.web.servlet.ResultActions changeStatus(String token, Long claimId, ClaimStatus targetStatus,
 			Long version) throws Exception {
+		ChangeClaimStatusRequest statusChangeRequest = new ChangeClaimStatusRequest(targetStatus, version);
+		String statusChangeRequestJson = objectMapper.writeValueAsString(statusChangeRequest);
 		return mockMvc.perform(patch("/api/v1/claims/" + claimId + "/status")
 				.header(HttpHeaders.AUTHORIZATION, bearer(token))
 				.contentType(MediaType.APPLICATION_JSON)
-				.content(objectMapper.writeValueAsString(new ChangeClaimStatusRequest(status, version))));
+				.content(statusChangeRequestJson));
 	}
 
 	private org.springframework.test.web.servlet.ResultActions assignClaim(
@@ -330,10 +341,16 @@ class ClaimControllerIntegrationTest {
 			Long claimId,
 			Long reviewerId,
 			Long version) throws Exception {
+		String assignmentRequestJson = """
+				{
+				  "assignedToId": %s,
+				  "version": %s
+				}
+				""".formatted(reviewerId, version);
 		return mockMvc.perform(patch("/api/v1/claims/" + claimId + "/assignment")
 				.header(HttpHeaders.AUTHORIZATION, bearer(token))
 				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"assignedToId\":" + reviewerId + ",\"version\":" + version + "}"));
+				.content(assignmentRequestJson));
 	}
 
 	private ReviewerTestData firstEligibleReviewer(String token) throws Exception {
@@ -341,19 +358,23 @@ class ClaimControllerIntegrationTest {
 						.header(HttpHeaders.AUTHORIZATION, bearer(token)))
 				.andExpect(status().isOk())
 				.andReturn();
-		var reviewerJson = objectMapper.readTree(eligibleReviewersResult.getResponse().getContentAsString()).get(0);
+		String reviewersResponseJson = eligibleReviewersResult.getResponse().getContentAsString();
+		var eligibleReviewers = objectMapper.readTree(reviewersResponseJson);
+		var reviewerJson = eligibleReviewers.get(0);
 		return new ReviewerTestData(reviewerJson.get("id").asLong(), reviewerJson.get("username").asText());
 	}
 
 	private String accessToken(String email, String password) throws Exception {
+		LoginRequest loginRequest = new LoginRequest(email, password);
+		String loginRequestJson = objectMapper.writeValueAsString(loginRequest);
 		MvcResult authenticationResult = mockMvc.perform(post("/api/auth/login")
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(objectMapper.writeValueAsString(new LoginRequest(email, password))))
+						.content(loginRequestJson))
 				.andExpect(status().isOk())
 				.andReturn();
-		return objectMapper.readValue(
-				authenticationResult.getResponse().getContentAsString(),
-				AuthTokenResponse.class).accessToken();
+		String authenticationResponseJson = authenticationResult.getResponse().getContentAsString();
+		AuthTokenResponse issuedTokens = objectMapper.readValue(authenticationResponseJson, AuthTokenResponse.class);
+		return issuedTokens.accessToken();
 	}
 
 	private Long extractClaimId(MvcResult createClaimResult) {
@@ -364,7 +385,9 @@ class ClaimControllerIntegrationTest {
 
 	private Long extractLong(MvcResult requestResult, String fieldName) {
 		try {
-			return objectMapper.readTree(requestResult.getResponse().getContentAsString()).get(fieldName).asLong();
+			String responseJson = requestResult.getResponse().getContentAsString();
+			var responseFields = objectMapper.readTree(responseJson);
+			return responseFields.get(fieldName).asLong();
 		}
 		catch (Exception exception) {
 			throw new AssertionError("Could not extract " + fieldName, exception);
@@ -373,7 +396,9 @@ class ClaimControllerIntegrationTest {
 
 	private String extractText(MvcResult requestResult, String fieldName) {
 		try {
-			return objectMapper.readTree(requestResult.getResponse().getContentAsString()).get(fieldName).asText();
+			String responseJson = requestResult.getResponse().getContentAsString();
+			var responseFields = objectMapper.readTree(responseJson);
+			return responseFields.get(fieldName).asText();
 		}
 		catch (Exception exception) {
 			throw new AssertionError("Could not extract " + fieldName, exception);

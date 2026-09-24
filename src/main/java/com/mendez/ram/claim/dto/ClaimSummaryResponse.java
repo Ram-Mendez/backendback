@@ -18,7 +18,27 @@ public record ClaimSummaryResponse(
 		String createdByUsername,
 		Instant createdAt,
 		Instant updatedAt) {
-	public ClaimSummaryResponse(Long id, String reference, String title, ClaimStatus status, Long createdById, String createdByUsername, Instant createdAt, Instant updatedAt) {
-		this(id,reference,title,status,ClaimPriority.NORMAL,null,null,null,createdById,createdByUsername,createdAt,updatedAt);
+	public ClaimSummaryResponse(
+			Long id,
+			String reference,
+			String title,
+			ClaimStatus status,
+			Long createdById,
+			String createdByUsername,
+			Instant createdAt,
+			Instant updatedAt) {
+		this(
+				id,
+				reference,
+				title,
+				status,
+				ClaimPriority.NORMAL,
+				null,
+				null,
+				null,
+				createdById,
+				createdByUsername,
+				createdAt,
+				updatedAt);
 	}
 }

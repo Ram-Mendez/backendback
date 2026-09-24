@@ -22,6 +22,7 @@ export class LoginComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly loading = signal(false);
+  readonly sessionExpired = this.authService.sessionExpired;
   readonly errorMessage = signal<string | null>(null);
   readonly form = new FormGroup({
     email: new FormControl('', {

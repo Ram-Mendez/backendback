@@ -37,9 +37,13 @@ public class LocalAttachmentStorage implements AttachmentStorage {
 		Path targetPath = resolveStoragePath(command.storageKey());
 		try {
 			Files.createDirectories(targetPath.getParent());
+
 			MessageDigest sha256Digest = createSha256Digest();
 			long sizeBytes = writeAttachment(command, targetPath, sha256Digest);
-			return new StoredAttachment(sizeBytes, HexFormat.of().formatHex(sha256Digest.digest()));
+			byte[] attachmentHashBytes = sha256Digest.digest();
+			String attachmentHashHex = HexFormat.of().formatHex(attachmentHashBytes);
+
+			return new StoredAttachment(sizeBytes, attachmentHashHex);
 		}
 		catch (FileAlreadyExistsException exception) {
 			LOGGER.error("Attachment storage collision storageKey={}", command.storageKey(), exception);
@@ -87,6 +91,7 @@ public class LocalAttachmentStorage implements AttachmentStorage {
 			throw new ApiException(HttpStatus.NOT_FOUND, "ATTACHMENT_NOT_FOUND",
 					"No existe el adjunto solicitado.");
 		}
+
 		try {
 			return new StoredAttachmentResource(
 					Files.newInputStream(attachmentPath, StandardOpenOption.READ),
@@ -119,22 +124,33 @@ public class LocalAttachmentStorage implements AttachmentStorage {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ATTACHMENT_PATH",
 					"La ruta del adjunto no es valida.");
 		}
+
 		return resolvedPath;
 	}
 
 	private void deleteEmptyParentDirectories(Path startingDirectory) throws IOException {
 		Path currentDirectory = startingDirectory;
-		while (currentDirectory != null
-				&& currentDirectory.startsWith(storageRoot)
-				&& !currentDirectory.equals(storageRoot)) {
+		while (isDirectoryBelowStorageRoot(currentDirectory)) {
 			try (var directoryEntries = Files.list(currentDirectory)) {
 				if (directoryEntries.findAny().isPresent()) {
 					return;
 				}
 			}
+
 			Files.deleteIfExists(currentDirectory);
 			currentDirectory = currentDirectory.getParent();
 		}
+	}
+
+	private boolean isDirectoryBelowStorageRoot(Path directory) {
+		if (directory == null) {
+			return false;
+		}
+		if (!directory.startsWith(storageRoot)) {
+			return false;
+		}
+
+		return !directory.equals(storageRoot);
 	}
 
 	private static MessageDigest createSha256Digest() {

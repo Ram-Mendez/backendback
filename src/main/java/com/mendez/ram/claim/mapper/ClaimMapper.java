@@ -19,18 +19,28 @@ public class ClaimMapper {
 				trimRequiredText(request.title()),
 				trimRequiredText(request.description()),
 				trimOptionalTextToNull(request.claimantName()),
-				request.priority() == null ? ClaimPriority.NORMAL : request.priority(),
+				priorityOrDefault(request.priority()),
 				request.dueAt(),
 				createdBy,
 				creationTime);
 	}
 
-	public void updateClaimEntity(Claim claim, UpdateClaimRequest request, AuthUser updatedBy, Instant updateTime) {
+	public void updateClaimEntity(
+			Claim claim,
+			UpdateClaimRequest request,
+			AuthUser updatedBy,
+			Instant updateTime) {
+
+		ClaimPriority priorityToUse =
+				request.priority() != null
+						? request.priority()
+						: claim.getPriority();
+
 		claim.updateDetails(
 				trimRequiredText(request.title()),
 				trimRequiredText(request.description()),
 				trimOptionalTextToNull(request.claimantName()),
-				request.priority() == null ? ClaimPriority.NORMAL : request.priority(),
+				priorityToUse,
 				request.dueAt(),
 				updatedBy,
 				updateTime);
@@ -44,8 +54,8 @@ public class ClaimMapper {
 				claim.getStatus(),
 				claim.getPriority(),
 				claim.getDueAt(),
-				claim.getAssignedTo() == null ? null : claim.getAssignedTo().getId(),
-				claim.getAssignedTo() == null ? null : claim.getAssignedTo().getUsername(),
+				userIdOrNull(claim.getAssignedTo()),
+				usernameOrNull(claim.getAssignedTo()),
 				claim.getCreatedBy().getId(),
 				claim.getCreatedBy().getUsername(),
 				claim.getCreatedAt(),
@@ -62,16 +72,40 @@ public class ClaimMapper {
 				claim.getPriority(),
 				claim.getDueAt(),
 				claim.getClaimantName(),
-				claim.getAssignedTo() == null ? null : claim.getAssignedTo().getId(),
-				claim.getAssignedTo() == null ? null : claim.getAssignedTo().getUsername(),
+				userIdOrNull(claim.getAssignedTo()),
+				usernameOrNull(claim.getAssignedTo()),
 				claim.getAssignedAt(),
 				claim.getCreatedBy().getId(),
 				claim.getCreatedBy().getUsername(),
-				claim.getUpdatedBy() == null ? null : claim.getUpdatedBy().getId(),
-				claim.getUpdatedBy() == null ? null : claim.getUpdatedBy().getUsername(),
+				userIdOrNull(claim.getUpdatedBy()),
+				usernameOrNull(claim.getUpdatedBy()),
 				claim.getCreatedAt(),
 				claim.getUpdatedAt(),
 				claim.getVersion());
+	}
+
+	private static ClaimPriority priorityOrDefault(ClaimPriority requestedPriority) {
+		if (requestedPriority == null) {
+			return ClaimPriority.NORMAL;
+		}
+
+		return requestedPriority;
+	}
+
+	private static Long userIdOrNull(AuthUser user) {
+		if (user == null) {
+			return null;
+		}
+
+		return user.getId();
+	}
+
+	private static String usernameOrNull(AuthUser user) {
+		if (user == null) {
+			return null;
+		}
+
+		return user.getUsername();
 	}
 
 	private static String trimRequiredText(String text) {
@@ -82,6 +116,7 @@ public class ClaimMapper {
 		if (text == null || text.isBlank()) {
 			return null;
 		}
+
 		return text.trim();
 	}
 }

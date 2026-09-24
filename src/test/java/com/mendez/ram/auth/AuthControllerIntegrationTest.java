@@ -49,7 +49,7 @@ class AuthControllerIntegrationTest {
 
 	@Test
 	void loginUsesExistingAuthUserAndStoresOnlyRefreshTokenHash() throws Exception {
-		MvcResult result = login("admin@local.dev", "DevAdmin123!")
+		MvcResult loginResult = login("admin@local.dev", "DevAdmin123!")
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.accessToken").isNotEmpty())
 				.andExpect(jsonPath("$.refreshToken").isNotEmpty())
@@ -58,13 +58,13 @@ class AuthControllerIntegrationTest {
 				.andExpect(jsonPath("$.user.roles").value(hasItem("ROLE_ADMIN")))
 				.andReturn();
 
-		AuthTokenResponse response = objectMapper.readValue(result.getResponse().getContentAsString(),
-				AuthTokenResponse.class);
+		String loginResponseJson = loginResult.getResponse().getContentAsString();
+		AuthTokenResponse issuedTokens = objectMapper.readValue(loginResponseJson, AuthTokenResponse.class);
 		transactionTemplate.executeWithoutResult(status -> {
-			assertThat(refreshTokenRepository
-					.findByTokenHashAndRevokedAtIsNull(tokenHashingService.sha256Hex(response.refreshToken())))
-					.isPresent();
-			assertThat(refreshTokenRepository.findByTokenHashAndRevokedAtIsNull(response.refreshToken()))
+			String refreshTokenHash = tokenHashingService.sha256Hex(issuedTokens.refreshToken());
+			var tokenStoredByHash = refreshTokenRepository.findByTokenHashAndRevokedAtIsNull(refreshTokenHash);
+			assertThat(tokenStoredByHash).isPresent();
+			assertThat(refreshTokenRepository.findByTokenHashAndRevokedAtIsNull(issuedTokens.refreshToken()))
 					.isEmpty();
 		});
 	}
@@ -94,36 +94,41 @@ class AuthControllerIntegrationTest {
 	@Test
 	void refreshRotatesRefreshToken() throws Exception {
 		AuthTokenResponse loginResponse = loginAndRead("manager@local.dev", "DevManager123!");
+		RefreshTokenRequest refreshRequest = new RefreshTokenRequest(loginResponse.refreshToken());
+		String refreshRequestJson = objectMapper.writeValueAsString(refreshRequest);
 
-		MvcResult result = mockMvc.perform(post("/api/auth/refresh")
+		MvcResult refreshResult = mockMvc.perform(post("/api/auth/refresh")
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(objectMapper.writeValueAsString(new RefreshTokenRequest(loginResponse.refreshToken()))))
+						.content(refreshRequestJson))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.accessToken").isNotEmpty())
 				.andExpect(jsonPath("$.refreshToken").isNotEmpty())
 				.andReturn();
 
-		AuthTokenResponse refreshResponse = objectMapper.readValue(result.getResponse().getContentAsString(),
-				AuthTokenResponse.class);
+		String refreshResponseJson = refreshResult.getResponse().getContentAsString();
+		AuthTokenResponse refreshResponse = objectMapper.readValue(refreshResponseJson, AuthTokenResponse.class);
 		assertThat(refreshResponse.refreshToken()).isNotEqualTo(loginResponse.refreshToken());
 
 		mockMvc.perform(post("/api/auth/refresh")
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(objectMapper.writeValueAsString(new RefreshTokenRequest(loginResponse.refreshToken()))))
+						.content(refreshRequestJson))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"));
 	}
 
 	private org.springframework.test.web.servlet.ResultActions login(String email, String password) throws Exception {
+		LoginRequest loginRequest = new LoginRequest(email, password);
+		String loginRequestJson = objectMapper.writeValueAsString(loginRequest);
 		return mockMvc.perform(post("/api/auth/login")
 				.contentType(MediaType.APPLICATION_JSON)
-				.content(objectMapper.writeValueAsString(new LoginRequest(email, password))));
+				.content(loginRequestJson));
 	}
 
 	private AuthTokenResponse loginAndRead(String email, String password) throws Exception {
-		MvcResult result = login(email, password)
+		MvcResult loginResult = login(email, password)
 				.andExpect(status().isOk())
 				.andReturn();
-		return objectMapper.readValue(result.getResponse().getContentAsString(), AuthTokenResponse.class);
+		String loginResponseJson = loginResult.getResponse().getContentAsString();
+		return objectMapper.readValue(loginResponseJson, AuthTokenResponse.class);
 	}
 }

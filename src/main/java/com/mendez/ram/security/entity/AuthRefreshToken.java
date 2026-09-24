@@ -56,7 +56,7 @@ public class AuthRefreshToken {
 		this.user = user;
 		this.tokenHash = tokenHash;
 		this.deviceId = deviceId;
-		this.userAgent = trim(userAgent, 512);
+		this.userAgent = truncateToMaxLength(userAgent, 512);
 		this.issuedAt = issuedAt;
 		this.expiresAt = expiresAt;
 	}
@@ -95,10 +95,11 @@ public class AuthRefreshToken {
 		}
 	}
 
-	private static String trim(String value, int maxLength) {
-		if (value == null || value.length() <= maxLength) {
-			return value;
+	private static String truncateToMaxLength(String text, int maxLength) {
+		if (text == null || text.length() <= maxLength) {
+			return text;
 		}
-		return value.substring(0, maxLength);
+
+		return text.substring(0, maxLength);
 	}
 }

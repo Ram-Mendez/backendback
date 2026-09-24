@@ -26,8 +26,10 @@ class LocalAttachmentStorageTest {
 	void storesStreamsLoadsAndDeletesFilesWithinRoot() throws Exception {
 		LocalAttachmentStorage storage = storage();
 		byte[] content = "Hola storage".getBytes(StandardCharsets.UTF_8);
+		StoreAttachmentCommand storageCommand = new StoreAttachmentCommand(
+				"claims/1/file.txt", new ByteArrayInputStream(content));
 
-		var stored = storage.store(new StoreAttachmentCommand("claims/1/file.txt", new ByteArrayInputStream(content)));
+		var stored = storage.store(storageCommand);
 		var loaded = storage.load("claims/1/file.txt");
 
 		assertThat(stored.sizeBytes()).isEqualTo(content.length);
@@ -44,9 +46,11 @@ class LocalAttachmentStorageTest {
 	@Test
 	void rejectsStorageKeysThatEscapeRoot() {
 		LocalAttachmentStorage storage = storage();
+		byte[] content = "escape".getBytes(StandardCharsets.UTF_8);
+		StoreAttachmentCommand escapingStorageCommand = new StoreAttachmentCommand(
+				"../escape.txt", new ByteArrayInputStream(content));
 
-		assertThatThrownBy(() -> storage.store(new StoreAttachmentCommand("../escape.txt",
-				new ByteArrayInputStream("escape".getBytes(StandardCharsets.UTF_8)))))
+		assertThatThrownBy(() -> storage.store(escapingStorageCommand))
 				.isInstanceOf(ApiException.class);
 	}
 
@@ -72,8 +76,9 @@ class LocalAttachmentStorageTest {
 				return partialContent.length;
 			}
 		};
+		StoreAttachmentCommand storageCommand = new StoreAttachmentCommand("claims/1/partial.txt", failingInput);
 
-		assertThatThrownBy(() -> storage.store(new StoreAttachmentCommand("claims/1/partial.txt", failingInput)))
+		assertThatThrownBy(() -> storage.store(storageCommand))
 				.isInstanceOf(ApiException.class);
 		assertThat(Files.exists(tempDir.resolve("claims/1/partial.txt"))).isFalse();
 	}

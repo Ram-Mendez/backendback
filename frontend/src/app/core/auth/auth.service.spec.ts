@@ -58,6 +58,51 @@ describe('AuthService', () => {
     expect(service.refreshToken()).toBe('new-refresh');
   });
 
+  it('expires an existing session once and retains the expiry notice for repeated failures', () => {
+    service.login({ email: 'user@example.com', password: 'password' }).subscribe();
+    httpMock.expectOne('/api/auth/login').flush(tokenResponse('access-token', 'refresh-token'));
+
+    expect(service.expireSession()).toBeTrue();
+    expect(service.expireSession()).toBeFalse();
+
+    expect(service.sessionExpired()).toBeTrue();
+    expect(service.accessToken()).toBeNull();
+    expect(service.refreshToken()).toBeNull();
+    expect(service.user()).toBeNull();
+    expect(window.localStorage.getItem('ram.accessToken')).toBeNull();
+    expect(window.localStorage.getItem('ram.refreshToken')).toBeNull();
+    expect(window.localStorage.getItem('ram.user')).toBeNull();
+  });
+
+  it('does not mark an anonymous session as expired', () => {
+    expect(service.expireSession()).toBeFalse();
+    expect(service.sessionExpired()).toBeFalse();
+  });
+
+  it('removes the expiry notice after a successful new login', () => {
+    service.login({ email: 'user@example.com', password: 'password' }).subscribe();
+    httpMock.expectOne('/api/auth/login').flush(tokenResponse('old-access', 'old-refresh'));
+    service.expireSession();
+
+    service.login({ email: 'user@example.com', password: 'password' }).subscribe();
+    httpMock.expectOne('/api/auth/login').flush(tokenResponse('new-access', 'new-refresh'));
+
+    expect(service.sessionExpired()).toBeFalse();
+    expect(service.isAuthenticated()).toBeTrue();
+  });
+
+  it('removes the expiry notice when the user logs out manually', () => {
+    service.login({ email: 'user@example.com', password: 'password' }).subscribe();
+    httpMock.expectOne('/api/auth/login').flush(tokenResponse('access-token', 'refresh-token'));
+    service.expireSession();
+
+    service.logout().subscribe();
+
+    expect(service.sessionExpired()).toBeFalse();
+    expect(service.isAuthenticated()).toBeFalse();
+    httpMock.expectNone('/api/auth/logout');
+  });
+
   function tokenResponse(accessToken: string, refreshToken: string): AuthTokenResponse {
     return {
       accessToken,

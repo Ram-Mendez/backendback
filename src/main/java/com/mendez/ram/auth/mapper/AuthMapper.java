@@ -18,6 +18,7 @@ public class AuthMapper {
 
 		for (SecurityRole role : user.getRoles()) {
 			roles.add(role.getCode());
+
 			for (SecurityPermission permission : role.getPermissions()) {
 				permissions.add(permission.getCode());
 			}

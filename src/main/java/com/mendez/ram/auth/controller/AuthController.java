@@ -58,7 +58,12 @@ public class AuthController {
 	@Operation(summary = "Revoke a refresh token or all active tokens for the authenticated user")
 	public void logout(@RequestBody(required = false) LogoutRequest request,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
-		authService.logout(request == null ? null : request.refreshToken(), principal);
+		String requestedRefreshToken = null;
+		if (request != null) {
+			requestedRefreshToken = request.refreshToken();
+		}
+
+		authService.logout(requestedRefreshToken, principal);
 	}
 
 	@GetMapping("/me")

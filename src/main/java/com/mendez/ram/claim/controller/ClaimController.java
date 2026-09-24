@@ -90,6 +90,7 @@ public class ClaimController {
 			@RequestParam(defaultValue = "createdAt,desc") String sort,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
 		ensureClaimDateRangeIsValid(createdFrom, createdTo);
+
 		ClaimSearchCriteria criteria = new ClaimSearchCriteria(
 				search,
 				status,
@@ -172,6 +173,7 @@ public class ClaimController {
 				.path("/{id}")
 				.buildAndExpand(response.id())
 				.toUri();
+
 		return ResponseEntity.created(location).body(response);
 	}
 
@@ -191,8 +193,13 @@ public class ClaimController {
 		return claimService.updateClaimStatus(id, request, principal);
 	}
 
-	private static void ensureClaimDateRangeIsValid(LocalDate createdFrom, LocalDate createdTo) {
-		if (createdFrom != null && createdTo != null && createdFrom.isAfter(createdTo)) {
+	private static void ensureClaimDateRangeIsValid(LocalDate createdFromInclusive, LocalDate createdToInclusive) {
+		if (createdFromInclusive == null || createdToInclusive == null) {
+			return;
+		}
+
+		boolean startsAfterLastIncludedDay = createdFromInclusive.isAfter(createdToInclusive);
+		if (startsAfterLastIncludedDay) {
 			throw new ApiException(
 					HttpStatus.BAD_REQUEST,
 					"INVALID_DATE_RANGE",
@@ -230,7 +237,8 @@ public class ClaimController {
 		Sort.Direction direction = Sort.Direction.DESC;
 		if (sortParts.length == 2 && !sortParts[1].isBlank()) {
 			try {
-				direction = Sort.Direction.fromString(sortParts[1].trim().toUpperCase(Locale.ROOT));
+				String requestedDirection = sortParts[1].trim().toUpperCase(Locale.ROOT);
+				direction = Sort.Direction.fromString(requestedDirection);
 			}
 			catch (IllegalArgumentException exception) {
 				throw new ApiException(
@@ -240,6 +248,8 @@ public class ClaimController {
 			}
 		}
 
-		return PageRequest.of(page, resolvedSize, Sort.by(direction, sortProperty));
+		Sort requestedSort = Sort.by(direction, sortProperty);
+
+		return PageRequest.of(page, resolvedSize, requestedSort);
 	}
 }

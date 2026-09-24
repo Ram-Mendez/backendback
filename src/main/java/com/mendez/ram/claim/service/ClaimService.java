@@ -100,8 +100,10 @@ public class ClaimService {
 		if (!canReviewClaims(principal)) {
 			specification = specification.and(ClaimSpecifications.createdById(principal.id()));
 		}
+
 		Page<ClaimSummaryResponse> claimSummaryPage = claimRepository.findAll(specification, pageable)
 				.map(claimMapper::toClaimSummaryResponse);
+
 		return PageResponse.from(claimSummaryPage);
 	}
 
@@ -109,6 +111,7 @@ public class ClaimService {
 	public ClaimResponse findClaimById(Long id, AuthenticatedUser principal) {
 		Claim claim = findClaimEntityById(id);
 		ensureUserCanViewClaim(claim, principal);
+
 		return claimMapper.toClaimResponse(claim);
 	}
 
@@ -116,14 +119,18 @@ public class ClaimService {
 	public ClaimResponse createClaim(CreateClaimRequest request, AuthenticatedUser principal) {
 		AuthUser actingUser = findAuthenticatedUser(principal);
 		Claim claim = claimMapper.toClaimEntity(request, actingUser, Instant.now(clock));
+
 		Claim savedClaim = claimRepository.saveAndFlush(claim);
 		entityManager.refresh(savedClaim);
+
 		recordClaimHistory(
 				savedClaim,
 				actingUser,
 				ClaimHistoryEventType.CREATED,
 				"status=" + savedClaim.getStatus());
+
 		LOGGER.info("Claim {} created by user {}", savedClaim.getReference(), actingUser.getId());
+
 		return claimMapper.toClaimResponse(savedClaim);
 	}
 
@@ -132,9 +139,12 @@ public class ClaimService {
 		Claim claim = findClaimEntityById(id);
 		ensureUserCanUpdateClaim(claim, principal);
 		ensureExpectedVersion(claim, request.version());
+
 		AuthUser actingUser = findAuthenticatedUser(principal);
 		ClaimPriority previousPriority = claim.getPriority();
+
 		claimMapper.updateClaimEntity(claim, request, actingUser, Instant.now(clock));
+
 		recordClaimHistory(claim, actingUser, ClaimHistoryEventType.EDITED, "details updated");
 		if (previousPriority != claim.getPriority()) {
 			recordClaimHistory(
@@ -143,9 +153,12 @@ public class ClaimService {
 					ClaimHistoryEventType.PRIORITY_CHANGED,
 					previousPriority + " -> " + claim.getPriority());
 		}
+
 		LOGGER.info("Claim {} edited by user {}", claim.getReference(), actingUser.getId());
+
 		claimRepository.flush();
 		entityManager.refresh(claim);
+
 		return claimMapper.toClaimResponse(claim);
 	}
 
@@ -154,6 +167,7 @@ public class ClaimService {
 		Claim claim = findClaimEntityById(id);
 		ensureUserCanViewClaim(claim, principal);
 		ensureExpectedVersion(claim, request.version());
+
 		ClaimStatus targetStatus = request.status();
 		ClaimStatus previousStatus = claim.getStatus();
 		if (!previousStatus.canTransitionTo(targetStatus)) {
@@ -164,21 +178,26 @@ public class ClaimService {
 		}
 
 		ensureUserCanChangeClaimStatus(claim, targetStatus, principal);
+
 		AuthUser actingUser = findAuthenticatedUser(principal);
 		claim.changeStatus(targetStatus, actingUser, Instant.now(clock));
+
 		recordClaimHistory(
 				claim,
 				actingUser,
 				ClaimHistoryEventType.STATUS_CHANGED,
 				previousStatus + " -> " + targetStatus);
+
 		LOGGER.info(
 				"Claim {} changed status from {} to {} by user {}",
 				claim.getReference(),
 				previousStatus,
 				targetStatus,
 				actingUser.getId());
+
 		claimRepository.flush();
 		entityManager.refresh(claim);
+
 		return claimMapper.toClaimResponse(claim);
 	}
 
@@ -192,7 +211,10 @@ public class ClaimService {
 		AuthUser assignee = findEligibleAssignee(request.assignedToId());
 		Long previousAssigneeId = currentClaimAssigneeId(claim);
 
-		if (!Objects.equals(claim.getVersion(), request.version())) {
+		long actualVersion = claim.getVersion();
+		Long expectedVersion = request.version();
+		boolean requestedVersionMatches = Objects.equals(actualVersion, expectedVersion);
+		if (!requestedVersionMatches) {
 			throw new ApiException(
 					HttpStatus.CONFLICT,
 					"CLAIM_VERSION_CONFLICT",
@@ -292,7 +314,8 @@ public class ClaimService {
 						"INVALID_ASSIGNEE",
 						"El responsable indicado no existe."));
 
-		if (!assignee.isEnabled() || !isEligibleReviewer(assignee)) {
+		boolean assigneeCanReviewClaims = assignee.isEnabled() && isEligibleReviewer(assignee);
+		if (!assigneeCanReviewClaims) {
 			throw new ApiException(
 					HttpStatus.BAD_REQUEST,
 					"INVALID_ASSIGNEE",
@@ -374,11 +397,16 @@ public class ClaimService {
 	}
 
 	private static boolean grantsClaimReviewRole(SecurityRole role) {
-		return role.getCode().equals("ROLE_ADMIN")
-				|| role.getCode().equals("ROLE_MANAGER")
-				|| role.getPermissions()
-						.stream()
-						.anyMatch(ClaimService::isClaimReviewPermission);
+		if (role.getCode().equals("ROLE_ADMIN")) {
+			return true;
+		}
+		if (role.getCode().equals("ROLE_MANAGER")) {
+			return true;
+		}
+
+		return role.getPermissions()
+				.stream()
+				.anyMatch(ClaimService::isClaimReviewPermission);
 	}
 
 	private static boolean isClaimReviewPermission(SecurityPermission permission) {
@@ -444,8 +472,11 @@ public class ClaimService {
 	}
 
 	private static void ensureExpectedVersion(Claim claim, Long expectedVersion) {
-		if (expectedVersion != null && claim.getVersion() == expectedVersion) {
-			return;
+		if (expectedVersion != null) {
+			long actualVersion = claim.getVersion();
+			if (actualVersion == expectedVersion) {
+				return;
+			}
 		}
 
 		throw new ApiException(
@@ -456,7 +487,10 @@ public class ClaimService {
 
 	private void ensureUserCanViewClaim(Claim claim, AuthenticatedUser principal) {
 		ensureAuthenticated(principal);
-		if (canReviewClaims(principal) || isClaimOwner(claim, principal)) {
+		if (canReviewClaims(principal)) {
+			return;
+		}
+		if (isClaimOwner(claim, principal)) {
 			return;
 		}
 
@@ -493,7 +527,7 @@ public class ClaimService {
 			return;
 		}
 
-		if (isClaimOwner(claim, principal) && targetStatus == ClaimStatus.REGISTERED) {
+		if (canOwnerSubmitClaim(claim, targetStatus, principal)) {
 			return;
 		}
 
@@ -513,13 +547,30 @@ public class ClaimService {
 	}
 
 	private static boolean canReviewClaims(AuthenticatedUser principal) {
-		return principal.permissions().contains("PERM_CLAIM_REVIEW")
-				|| principal.permissions().contains("PERM_CLAIM_ADMIN")
-				|| principal.roles().contains("ROLE_ADMIN")
-				|| principal.roles().contains("ROLE_MANAGER");
+		if (principal.permissions().contains("PERM_CLAIM_REVIEW")) {
+			return true;
+		}
+		if (principal.permissions().contains("PERM_CLAIM_ADMIN")) {
+			return true;
+		}
+		if (principal.roles().contains("ROLE_ADMIN")) {
+			return true;
+		}
+
+		return principal.roles().contains("ROLE_MANAGER");
+	}
+
+	private static boolean canOwnerSubmitClaim(Claim claim, ClaimStatus targetStatus, AuthenticatedUser principal) {
+		if (!isClaimOwner(claim, principal)) {
+			return false;
+		}
+
+		return targetStatus == ClaimStatus.REGISTERED;
 	}
 
 	private static boolean isClaimOwner(Claim claim, AuthenticatedUser principal) {
-		return claim.getCreatedBy().getId().equals(principal.id());
+		Long claimOwnerId = claim.getCreatedBy().getId();
+		Long authenticatedUserId = principal.id();
+		return claimOwnerId.equals(authenticatedUserId);
 	}
 }

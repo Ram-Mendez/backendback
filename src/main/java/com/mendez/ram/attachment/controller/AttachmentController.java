@@ -82,13 +82,18 @@ public class AttachmentController {
 			@AuthenticationPrincipal AuthenticatedUser principal) {
 		AttachmentDownload attachmentDownload = attachmentService.downloadClaimAttachment(claimId, attachmentId, principal);
 		ClaimAttachment attachment = attachmentDownload.attachment();
+
+		MediaType contentType = parseContentType(attachment.getContentType());
+		long contentLength = attachmentDownload.sizeBytes();
+		String contentDisposition = ContentDisposition.attachment()
+				.filename(attachment.getFileName(), StandardCharsets.UTF_8)
+				.build()
+				.toString();
+
 		return ResponseEntity.ok()
-				.contentType(parseContentType(attachment.getContentType()))
-				.contentLength(attachmentDownload.sizeBytes())
-				.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
-						.filename(attachment.getFileName(), StandardCharsets.UTF_8)
-						.build()
-						.toString())
+				.contentType(contentType)
+				.contentLength(contentLength)
+				.header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition)
 				.body(new InputStreamResource(attachmentDownload.inputStream()));
 	}
 

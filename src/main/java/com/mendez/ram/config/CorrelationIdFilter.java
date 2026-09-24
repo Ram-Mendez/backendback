@@ -46,12 +46,14 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
 			LOGGER.error("HTTP !! method={} path={} status={} elapsedMs={} exception={} message={}",
 					method, path, response.getStatus(), elapsedMs,
 					exception.getClass().getSimpleName(), exception.getMessage(), exception);
+
 			throw exception;
 		}
 		finally {
 			long elapsedMs = elapsedMillis(startedAt);
 			LOGGER.info("HTTP <- method={} path={} status={} elapsedMs={}",
 					method, path, response.getStatus(), elapsedMs);
+
 			MDC.remove("correlationId");
 		}
 	}
@@ -65,6 +67,7 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
 		if (StringUtils.hasText(headerValue) && headerValue.length() <= MAX_LENGTH) {
 			return headerValue;
 		}
+
 		return UUID.randomUUID().toString();
 	}
 }

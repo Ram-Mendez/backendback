@@ -6,6 +6,7 @@ import { ActivatedRouteSnapshot, Router, RouterStateSnapshot, UrlTree, provideRo
 import { firstValueFrom, Observable } from 'rxjs';
 
 import { AuthTokenResponse } from '../auth/auth.models';
+import { AuthService } from '../auth/auth.service';
 import { authGuard } from './auth.guard';
 
 @Component({
@@ -41,6 +42,7 @@ describe('authGuard', () => {
     const result = runGuard('/claims');
     expect(result instanceof UrlTree).toBe(true);
     expect(router.serializeUrl(result as UrlTree)).toBe('/login?returnUrl=%2Fclaims');
+    expect(TestBed.inject(AuthService).sessionExpired()).toBeFalse();
   });
 
   it('refreshes when a refresh token exists', async () => {
@@ -53,7 +55,35 @@ describe('authGuard', () => {
     request.flush(tokenResponse());
 
     expect(await promise).toBe(true);
+    expect(TestBed.inject(AuthService).sessionExpired()).toBeFalse();
   });
+
+  for (const refreshStatus of [401, 500]) {
+    it(`clears the partial session and returns a login URL when refresh fails with ${refreshStatus}`, async () => {
+      window.localStorage.setItem('ram.refreshToken', 'refresh-token');
+      window.localStorage.setItem('ram.user', JSON.stringify(tokenResponse().user));
+      const navigate = spyOn(router, 'navigate');
+      const guardResult = runGuard('/claims?status=DRAFT') as Observable<boolean | UrlTree>;
+      const redirectPromise = firstValueFrom(guardResult);
+
+      httpMock.expectOne('/api/auth/refresh').flush(
+        { code: 'INVALID_REFRESH_TOKEN' },
+        { status: refreshStatus, statusText: 'Refresh failed' }
+      );
+
+      const redirect = await redirectPromise as UrlTree;
+      const authService = TestBed.inject(AuthService);
+      expect(router.serializeUrl(redirect)).toBe('/login?returnUrl=%2Fclaims%3Fstatus%3DDRAFT');
+      expect(authService.sessionExpired()).toBeTrue();
+      expect(authService.accessToken()).toBeNull();
+      expect(authService.refreshToken()).toBeNull();
+      expect(authService.user()).toBeNull();
+      expect(window.localStorage.getItem('ram.accessToken')).toBeNull();
+      expect(window.localStorage.getItem('ram.refreshToken')).toBeNull();
+      expect(window.localStorage.getItem('ram.user')).toBeNull();
+      expect(navigate).not.toHaveBeenCalled();
+    });
+  }
 
   function runGuard(url: string): unknown {
     return TestBed.runInInjectionContext(() => authGuard(

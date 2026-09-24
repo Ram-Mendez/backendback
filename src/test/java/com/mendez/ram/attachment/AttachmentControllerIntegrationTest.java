@@ -192,11 +192,12 @@ class AttachmentControllerIntegrationTest {
 		ExecutorService executor = Executors.newFixedThreadPool(2);
 		CountDownLatch start = new CountDownLatch(1);
 		try {
-			Future<Integer> first = executor.submit(() -> uploadRaceFile(userToken, claimId, start, "Uno"));
-			Future<Integer> second = executor.submit(() -> uploadRaceFile(userToken, claimId, start, "Dos"));
+			Future<Integer> firstUploadStatus = executor.submit(() -> uploadRaceFile(userToken, claimId, start, "Uno"));
+			Future<Integer> secondUploadStatus = executor.submit(() -> uploadRaceFile(userToken, claimId, start, "Dos"));
 			start.countDown();
 
-			assertThat(List.of(first.get(), second.get())).containsOnly(201);
+			List<Integer> completedUploadStatuses = List.of(firstUploadStatus.get(), secondUploadStatus.get());
+			assertThat(completedUploadStatuses).containsOnly(201);
 		}
 		finally {
 			executor.shutdownNow();
@@ -476,13 +477,15 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	private MvcResult createClaimResult(String token, String title) throws Exception {
+		CreateClaimRequest createRequest = new CreateClaimRequest(
+				title,
+				"Reclamacion generada por test de adjuntos.",
+				"Cliente Test");
+		String createRequestJson = objectMapper.writeValueAsString(createRequest);
 		return mockMvc.perform(post("/api/v1/claims")
 				.header(HttpHeaders.AUTHORIZATION, bearer(token))
 				.contentType(MediaType.APPLICATION_JSON)
-				.content(objectMapper.writeValueAsString(new CreateClaimRequest(
-						title,
-						"Reclamacion generada por test de adjuntos.",
-						"Cliente Test"))))
+				.content(createRequestJson))
 				.andExpect(status().isCreated())
 				.andExpect(header().string(HttpHeaders.LOCATION, startsWith("http://localhost/api/v1/claims/")))
 				.andReturn();
@@ -498,30 +501,36 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	private Long changeStatus(String token, Long claimId, ClaimStatus targetStatus, Long version) throws Exception {
+		ChangeClaimStatusRequest statusChangeRequest = new ChangeClaimStatusRequest(targetStatus, version);
+		String statusChangeRequestJson = objectMapper.writeValueAsString(statusChangeRequest);
 		MvcResult statusChangeResult = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
 						.patch("/api/v1/claims/" + claimId + "/status")
 						.header(HttpHeaders.AUTHORIZATION, bearer(token))
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(objectMapper.writeValueAsString(new ChangeClaimStatusRequest(targetStatus, version))))
+						.content(statusChangeRequestJson))
 				.andExpect(status().isOk())
 				.andReturn();
 		return extractLong(statusChangeResult, "version");
 	}
 
 	private String accessToken(String email, String password) throws Exception {
+		LoginRequest loginRequest = new LoginRequest(email, password);
+		String loginRequestJson = objectMapper.writeValueAsString(loginRequest);
 		MvcResult authenticationResult = mockMvc.perform(post("/api/auth/login")
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(objectMapper.writeValueAsString(new LoginRequest(email, password))))
+						.content(loginRequestJson))
 				.andExpect(status().isOk())
 				.andReturn();
-		return objectMapper.readValue(
-				authenticationResult.getResponse().getContentAsString(),
-				AuthTokenResponse.class).accessToken();
+		String authenticationResponseJson = authenticationResult.getResponse().getContentAsString();
+		AuthTokenResponse issuedTokens = objectMapper.readValue(authenticationResponseJson, AuthTokenResponse.class);
+		return issuedTokens.accessToken();
 	}
 
 	private Long extractLong(MvcResult requestResult, String fieldName) {
 		try {
-			return objectMapper.readTree(requestResult.getResponse().getContentAsString()).get(fieldName).asLong();
+			String responseJson = requestResult.getResponse().getContentAsString();
+			var responseFields = objectMapper.readTree(responseJson);
+			return responseFields.get(fieldName).asLong();
 		}
 		catch (Exception exception) {
 			throw new AssertionError("Could not extract " + fieldName, exception);
@@ -530,10 +539,10 @@ class AttachmentControllerIntegrationTest {
 
 	private UUID extractUuid(MvcResult attachmentListResult, int index) {
 		try {
-			String attachmentId = objectMapper.readTree(attachmentListResult.getResponse().getContentAsString())
-					.get(index)
-					.get("id")
-					.asText();
+			String responseJson = attachmentListResult.getResponse().getContentAsString();
+			var attachmentList = objectMapper.readTree(responseJson);
+			var attachment = attachmentList.get(index);
+			String attachmentId = attachment.get("id").asText();
 			return UUID.fromString(attachmentId);
 		}
 		catch (Exception exception) {

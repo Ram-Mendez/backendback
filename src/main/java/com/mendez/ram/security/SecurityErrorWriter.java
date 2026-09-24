@@ -27,12 +27,17 @@ public class SecurityErrorWriter {
 			throws IOException {
 		response.setStatus(status.value());
 		response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+
 		ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, message);
-		problem.setType(URI.create("urn:ram:error:" + code.toLowerCase().replace('_', '-')));
+		String errorTypeName = code.toLowerCase().replace('_', '-');
+		URI errorType = URI.create("urn:ram:error:" + errorTypeName);
+
+		problem.setType(errorType);
 		problem.setTitle(status.getReasonPhrase());
 		problem.setInstance(URI.create(path));
 		problem.setProperty("code", code);
 		problem.setProperty("timestamp", OffsetDateTime.now(clock));
+
 		objectMapper.writeValue(response.getOutputStream(), problem);
 	}
 }

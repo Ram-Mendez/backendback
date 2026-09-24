@@ -68,10 +68,12 @@ class ClaimServiceTest {
 		when(authUserRepository.findById(1L)).thenReturn(Optional.of(actor));
 		when(claimRepository.saveAndFlush(any(Claim.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-		var createdClaim = claimService.createClaim(new CreateClaimRequest(
+		CreateClaimRequest createRequest = new CreateClaimRequest(
 				"  Missing invoice  ",
 				"  Detailed claim description.  ",
-				"  Cliente Test  "), principal);
+				"  Cliente Test  ");
+
+		var createdClaim = claimService.createClaim(createRequest, principal);
 
 		assertThat(createdClaim.title()).isEqualTo("Missing invoice");
 		assertThat(createdClaim.description()).isEqualTo("Detailed claim description.");
@@ -90,8 +92,9 @@ class ClaimServiceTest {
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
 		when(authUserRepository.findById(1L)).thenReturn(Optional.of(actor));
 
-		var updatedClaim = claimService.updateClaimStatus(10L,
-				new ChangeClaimStatusRequest(ClaimStatus.REGISTERED, 0L), principal);
+		ChangeClaimStatusRequest submitRequest = new ChangeClaimStatusRequest(ClaimStatus.REGISTERED, 0L);
+
+		var updatedClaim = claimService.updateClaimStatus(10L, submitRequest, principal);
 
 		assertThat(updatedClaim.status()).isEqualTo(ClaimStatus.REGISTERED);
 		verify(claimRepository).flush();
@@ -106,8 +109,9 @@ class ClaimServiceTest {
 		Claim claim = new Claim("Draft", "Description", null, actor, NOW);
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
 
-		assertThatThrownBy(() -> claimService.updateClaimStatus(10L,
-				new ChangeClaimStatusRequest(ClaimStatus.ACCEPTED, 0L), principal))
+		ChangeClaimStatusRequest invalidTransitionRequest = new ChangeClaimStatusRequest(ClaimStatus.ACCEPTED, 0L);
+
+		assertThatThrownBy(() -> claimService.updateClaimStatus(10L, invalidTransitionRequest, principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.CONFLICT));
 	}
@@ -128,9 +132,9 @@ class ClaimServiceTest {
 				Set.of("PERM_CLAIM_READ", "PERM_CLAIM_UPDATE"));
 		Claim claim = new Claim("Draft", "Description", null, authUser(2L, "other-user"), NOW);
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
+		UpdateClaimRequest updateRequest = new UpdateClaimRequest("New title", "New description", null, 0L);
 
-		assertThatThrownBy(() -> claimService.updateClaim(10L,
-				new UpdateClaimRequest("New title", "New description", null, 0L), principal))
+		assertThatThrownBy(() -> claimService.updateClaim(10L, updateRequest, principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
 	}
@@ -145,9 +149,9 @@ class ClaimServiceTest {
 		claim.changeStatus(ClaimStatus.UNDER_REVIEW, actor, NOW);
 		claim.changeStatus(ClaimStatus.ACCEPTED, actor, NOW);
 		when(claimRepository.findWithUsersById(10L)).thenReturn(Optional.of(claim));
+		UpdateClaimRequest updateRequest = new UpdateClaimRequest("New title", "New description", null, 0L);
 
-		assertThatThrownBy(() -> claimService.updateClaim(10L,
-				new UpdateClaimRequest("New title", "New description", null, 0L), principal))
+		assertThatThrownBy(() -> claimService.updateClaim(10L, updateRequest, principal))
 				.isInstanceOfSatisfying(ApiException.class, exception ->
 						assertThat(exception.getStatus()).isEqualTo(HttpStatus.CONFLICT));
 	}
@@ -163,7 +167,9 @@ class ClaimServiceTest {
 		when(authUserRepository.findById(1L)).thenReturn(Optional.of(actor));
 		when(authUserRepository.findById(2L)).thenReturn(Optional.of(disabledReviewer));
 
-		assertThatThrownBy(() -> claimService.assignClaim(10L, new AssignClaimRequest(2L, 0L), principal))
+		AssignClaimRequest assignmentRequest = new AssignClaimRequest(2L, 0L);
+
+		assertThatThrownBy(() -> claimService.assignClaim(10L, assignmentRequest, principal))
 				.isInstanceOfSatisfying(ApiException.class, exception -> {
 					assertThat(exception.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
 					assertThat(exception.getCode()).isEqualTo("INVALID_ASSIGNEE");

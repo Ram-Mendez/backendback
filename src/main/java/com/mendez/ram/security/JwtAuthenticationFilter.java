@@ -43,11 +43,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			JwtClaims claims = jwtService.parseAccessToken(token);
 			AuthUser user = authUserRepository.findWithRolesById(claims.userId())
 					.orElseThrow(() -> new JwtValidationException("JWT user does not exist"));
+
 			ensureAccountUsableForToken(user);
+
 			AuthenticatedUser principal = AuthenticatedUser.from(user);
 			UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
 					principal, null, principal.getAuthorities());
 			SecurityContextHolder.getContext().setAuthentication(authentication);
+
 			filterChain.doFilter(request, response);
 		}
 		catch (JwtValidationException | ApiException exception) {
@@ -63,13 +66,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			return null;
 		}
 		String token = header.substring(7).trim();
+
 		return token.isBlank() ? null : token;
 	}
 
 	private static void ensureAccountUsableForToken(AuthUser user) {
-		if (!user.isEnabled() || !user.isEmailVerified() || !user.isAccountNonLocked()
-				|| !user.isCredentialsNonExpired()) {
+		if (!isAccountUsableForToken(user)) {
 			throw new JwtValidationException("JWT user account is not usable");
 		}
+	}
+
+	private static boolean isAccountUsableForToken(AuthUser user) {
+		return user.isEnabled()
+				&& user.isEmailVerified()
+				&& user.isAccountNonLocked()
+				&& user.isCredentialsNonExpired();
 	}
 }

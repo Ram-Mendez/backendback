@@ -63,8 +63,10 @@ public class AuthService {
 		}
 
 		ensureAccountCanAuthenticate(user);
+
 		OffsetDateTime now = OffsetDateTime.now(clock);
 		user.markSuccessfulLogin(now);
+
 		return issueTokens(user, deviceId, userAgent, now);
 	}
 
@@ -72,6 +74,7 @@ public class AuthService {
 	public AuthTokenResponse refresh(RefreshTokenRequest request, String deviceId, String userAgent) {
 		OffsetDateTime now = OffsetDateTime.now(clock);
 		String tokenHash = tokenHashingService.sha256Hex(request.refreshToken());
+
 		AuthRefreshToken existingToken = refreshTokenRepository.findByTokenHashAndRevokedAtIsNull(tokenHash)
 				.orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_REFRESH_TOKEN",
 						"El refresh token no es valido."));
@@ -98,6 +101,7 @@ public class AuthService {
 		OffsetDateTime now = OffsetDateTime.now(clock);
 		if (StringUtils.hasText(rawRefreshToken)) {
 			String tokenHash = tokenHashingService.sha256Hex(rawRefreshToken);
+
 			refreshTokenRepository.findByTokenHashAndRevokedAtIsNull(tokenHash)
 					.ifPresent(token -> token.revoke(now));
 			return;
@@ -113,6 +117,7 @@ public class AuthService {
 		AuthUser user = authUserRepository.findWithRolesById(principal.id())
 				.orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED",
 						"Debes autenticarte para acceder a este recurso."));
+
 		return authMapper.toProfile(user);
 	}
 
@@ -120,16 +125,19 @@ public class AuthService {
 		String accessToken = jwtService.createAccessToken(user);
 		String rawRefreshToken = generateRefreshToken();
 		OffsetDateTime refreshExpiresAt = now.plus(securityProperties.getRefreshTokenTtl());
+
 		AuthRefreshToken refreshToken = new AuthRefreshToken(
 				user,
 				tokenHashingService.sha256Hex(rawRefreshToken),
-				trim(deviceId, 128),
+				truncateToMaxLength(deviceId, 128),
 				userAgent,
 				now,
 				refreshExpiresAt);
+
 		refreshTokenRepository.save(refreshToken);
 
 		OffsetDateTime accessExpiresAt = now.plus(securityProperties.getAccessTokenTtl());
+
 		return new AuthTokenResponse(
 				accessToken,
 				rawRefreshToken,
@@ -144,16 +152,32 @@ public class AuthService {
 		if (!user.isEnabled()) {
 			throw new ApiException(HttpStatus.FORBIDDEN, "ACCOUNT_DISABLED", "La cuenta esta deshabilitada.");
 		}
+
 		if (!user.isEmailVerified()) {
 			throw new ApiException(HttpStatus.FORBIDDEN, "EMAIL_NOT_VERIFIED", "El email de la cuenta no esta verificado.");
 		}
-		if (!user.isAccountNonLocked() || (user.getLockedUntil() != null && user.getLockedUntil().isAfter(now))) {
+
+		if (isAccountLocked(user, now)) {
 			throw new ApiException(HttpStatus.LOCKED, "ACCOUNT_LOCKED", "La cuenta esta bloqueada.");
 		}
+
 		if (!user.isCredentialsNonExpired()) {
 			throw new ApiException(HttpStatus.FORBIDDEN, "CREDENTIALS_EXPIRED",
 					"Las credenciales de la cuenta han expirado.");
 		}
+	}
+
+	private static boolean isAccountLocked(AuthUser user, OffsetDateTime currentTime) {
+		if (!user.isAccountNonLocked()) {
+			return true;
+		}
+
+		OffsetDateTime lockedUntil = user.getLockedUntil();
+		if (lockedUntil == null) {
+			return false;
+		}
+
+		return lockedUntil.isAfter(currentTime);
 	}
 
 	private ApiException badCredentials() {
@@ -161,15 +185,17 @@ public class AuthService {
 	}
 
 	private static String generateRefreshToken() {
-		byte[] bytes = new byte[48];
-		SECURE_RANDOM.nextBytes(bytes);
-		return TOKEN_ENCODER.encodeToString(bytes);
+		byte[] randomTokenBytes = new byte[48];
+		SECURE_RANDOM.nextBytes(randomTokenBytes);
+
+		return TOKEN_ENCODER.encodeToString(randomTokenBytes);
 	}
 
-	private static String trim(String value, int maxLength) {
-		if (value == null || value.length() <= maxLength) {
-			return value;
+	private static String truncateToMaxLength(String text, int maxLength) {
+		if (text == null || text.length() <= maxLength) {
+			return text;
 		}
-		return value.substring(0, maxLength);
+
+		return text.substring(0, maxLength);
 	}
 }

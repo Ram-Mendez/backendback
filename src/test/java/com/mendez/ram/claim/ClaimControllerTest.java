@@ -58,10 +58,17 @@ class ClaimControllerTest {
 
 	@Test
 	void getReturnsStablePagedResponse() throws Exception {
-		when(claimService.searchClaims(any(), any(Pageable.class), any())).thenReturn(new PageResponse<>(
-				List.of(new ClaimSummaryResponse(1L, "CLM-2026-000001", "Claim title",
-						ClaimStatus.DRAFT, 1L, "dev-user", NOW, NOW)),
-				0, 20, 1, 1, true, true));
+		ClaimSummaryResponse matchingClaim = new ClaimSummaryResponse(
+				1L, "CLM-2026-000001", "Claim title", ClaimStatus.DRAFT, 1L, "dev-user", NOW, NOW);
+		int pageNumber = 0;
+		int pageSize = 20;
+		long totalElements = 1;
+		int totalPages = 1;
+		boolean firstPage = true;
+		boolean lastPage = true;
+		PageResponse<ClaimSummaryResponse> expectedPage = new PageResponse<>(
+				List.of(matchingClaim), pageNumber, pageSize, totalElements, totalPages, firstPage, lastPage);
+		when(claimService.searchClaims(any(), any(Pageable.class), any())).thenReturn(expectedPage);
 
 		mockMvc.perform(get("/api/v1/claims")
 						.param("search", "claim")

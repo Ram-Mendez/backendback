@@ -9,18 +9,18 @@ public enum ClaimStatus {
 	REJECTED,
 	INADMISSIBLE;
 
-	public boolean canTransitionTo(ClaimStatus target) {
-		if (target == null || target == this) {
+	public boolean canTransitionTo(ClaimStatus targetStatus) {
+		if (targetStatus == null || targetStatus == this) {
 			return false;
 		}
 		return switch (this) {
-			case DRAFT -> target == REGISTERED;
-			case REGISTERED -> target == UNDER_REVIEW;
-			case UNDER_REVIEW -> target == ACCEPTED
-					|| target == REJECTED
-					|| target == PENDING_CORRECTION
-					|| target == INADMISSIBLE;
-			case PENDING_CORRECTION -> target == REGISTERED || target == ACCEPTED;
+			case DRAFT -> targetStatus == REGISTERED;
+			case REGISTERED -> targetStatus == UNDER_REVIEW;
+			case UNDER_REVIEW -> targetStatus == ACCEPTED
+					|| targetStatus == REJECTED
+					|| targetStatus == PENDING_CORRECTION
+					|| targetStatus == INADMISSIBLE;
+			case PENDING_CORRECTION -> targetStatus == REGISTERED;
 			case ACCEPTED, REJECTED, INADMISSIBLE -> false;
 		};
 	}

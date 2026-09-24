@@ -47,6 +47,13 @@
         </div>
       </div>
 
+      @if (sessionExpired()) {
+        <div class="login-error" role="alert">
+          <strong>Sesión finalizada</strong>
+          <span>Tu sesión ha expirado. Inicia sesión de nuevo.</span>
+        </div>
+      }
+
       @if (errorMessage()) {
         <div class="login-error" role="alert">
           <strong>No se ha podido entrar</strong>

@@ -24,7 +24,38 @@ public record ClaimResponse(
 		Instant createdAt,
 		Instant updatedAt,
 		long version) {
-	public ClaimResponse(Long id, String reference, String title, String description, ClaimStatus status, String claimantName, Long createdById, String createdByUsername, Long updatedById, String updatedByUsername, Instant createdAt, Instant updatedAt, long version) {
-		this(id,reference,title,description,status,ClaimPriority.NORMAL,null,claimantName,null,null,null,createdById,createdByUsername,updatedById,updatedByUsername,createdAt,updatedAt,version);
+	public ClaimResponse(
+			Long id,
+			String reference,
+			String title,
+			String description,
+			ClaimStatus status,
+			String claimantName,
+			Long createdById,
+			String createdByUsername,
+			Long updatedById,
+			String updatedByUsername,
+			Instant createdAt,
+			Instant updatedAt,
+			long version) {
+		this(
+				id,
+				reference,
+				title,
+				description,
+				status,
+				ClaimPriority.NORMAL,
+				null,
+				claimantName,
+				null,
+				null,
+				null,
+				createdById,
+				createdByUsername,
+				updatedById,
+				updatedByUsername,
+				createdAt,
+				updatedAt,
+				version);
 	}
 }
