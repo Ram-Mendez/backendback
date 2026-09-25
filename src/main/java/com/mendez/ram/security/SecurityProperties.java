@@ -14,7 +14,7 @@ public class SecurityProperties {
 	@NotBlank
 	private String jwtSecret;
 
-	private Duration accessTokenTtl = Duration.ofMinutes(15);
+	private Duration accessTokenTtl = Duration.ofMinutes(45);
 
 	private Duration refreshTokenTtl = Duration.ofDays(7);
 

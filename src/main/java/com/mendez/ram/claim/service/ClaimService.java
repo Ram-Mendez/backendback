@@ -26,6 +26,7 @@ import com.mendez.ram.claim.entity.ClaimStatus;
 import com.mendez.ram.claim.mapper.ClaimMapper;
 import com.mendez.ram.claim.repository.ClaimCommentRepository;
 import com.mendez.ram.claim.repository.ClaimHistoryRepository;
+import com.mendez.ram.claim.repository.ClaimIdView;
 import com.mendez.ram.claim.repository.ClaimRepository;
 import com.mendez.ram.claim.repository.ClaimSpecifications;
 import com.mendez.ram.exception.ApiException;
@@ -35,15 +36,18 @@ import com.mendez.ram.security.entity.SecurityPermission;
 import com.mendez.ram.security.entity.SecurityRole;
 import com.mendez.ram.security.repository.AuthUserRepository;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Service
 public class ClaimService {
@@ -57,6 +61,7 @@ public class ClaimService {
 	private final Clock clock;
 	private final ClaimHistoryRepository claimHistoryRepository;
 	private final ClaimCommentRepository claimCommentRepository;
+	private final ClaimAssignmentService claimAssignmentService;
 
 	@Autowired
 	public ClaimService(
@@ -66,7 +71,8 @@ public class ClaimService {
 			EntityManager entityManager,
 			Clock clock,
 			ClaimHistoryRepository claimHistoryRepository,
-			ClaimCommentRepository claimCommentRepository) {
+			ClaimCommentRepository claimCommentRepository,
+			ClaimAssignmentService claimAssignmentService) {
 		this.claimRepository = claimRepository;
 		this.authUserRepository = authUserRepository;
 		this.claimMapper = claimMapper;
@@ -74,6 +80,7 @@ public class ClaimService {
 		this.clock = clock;
 		this.claimHistoryRepository = claimHistoryRepository;
 		this.claimCommentRepository = claimCommentRepository;
+		this.claimAssignmentService = claimAssignmentService;
 	}
 
 	public ClaimService(
@@ -89,7 +96,8 @@ public class ClaimService {
 				entityManager,
 				clock,
 				null,
-				null);
+				null,
+				new ClaimAssignmentService(claimRepository, authUserRepository, entityManager, clock));
 	}
 
 	@Transactional(readOnly = true)
@@ -100,9 +108,25 @@ public class ClaimService {
 		if (!canReviewClaims(principal)) {
 			specification = specification.and(ClaimSpecifications.createdById(principal.id()));
 		}
-		Page<ClaimSummaryResponse> claimSummaryPage = claimRepository.findAll(specification, pageable)
+		Page<ClaimSummaryResponse> claimSummaryPage = findMatchingClaims(claimSearchCriteria, specification, pageable)
 				.map(claimMapper::toClaimSummaryResponse);
 		return PageResponse.from(claimSummaryPage);
+	}
+
+	private Page<Claim> findMatchingClaims(
+			ClaimSearchCriteria criteria,
+			Specification<Claim> specification,
+			Pageable pageable) {
+		if (!StringUtils.hasText(criteria.search()) || !pageable.isPaged() || !pageable.getSort().isSorted()) {
+			return claimRepository.findAll(specification, pageable);
+		}
+
+		Page<ClaimIdView> matchingIds = claimRepository.findBy(
+				specification,
+				query -> query.as(ClaimIdView.class).page(pageable));
+		List<Long> claimIds = matchingIds.getContent().stream().map(ClaimIdView::getId).toList();
+		List<Claim> matchingClaims = claimRepository.findByIdIn(claimIds, pageable);
+		return new PageImpl<>(matchingClaims, pageable, matchingIds.getTotalElements());
 	}
 
 	@Transactional(readOnly = true)
@@ -165,6 +189,7 @@ public class ClaimService {
 
 		ensureUserCanChangeClaimStatus(claim, targetStatus, principal);
 		AuthUser actingUser = findAuthenticatedUser(principal);
+		entityManager.refresh(claim, LockModeType.PESSIMISTIC_WRITE);
 		claim.changeStatus(targetStatus, actingUser, Instant.now(clock));
 		recordClaimHistory(
 				claim,
@@ -200,19 +225,17 @@ public class ClaimService {
 			);
 		}
 
-		claim.assignTo(assignee, actingUser, Instant.now(clock));
-		recordClaimAssignmentHistory(claim, actingUser, previousAssigneeId, assignee);
+		Claim assignedClaim = claimAssignmentService.assignClaim(
+				id, request.version(), assignee.getId(), actingUser.getId());
+		recordClaimAssignmentHistory(assignedClaim, actingUser, previousAssigneeId, assignee);
 
 		LOGGER.info(
 				"Claim {} assigned to user {} by user {}",
-				claim.getReference(),
+				assignedClaim.getReference(),
 				assignee.getId(),
 				actingUser.getId());
 
-		claimRepository.flush();
-		entityManager.refresh(claim);
-
-		return claimMapper.toClaimResponse(claim);
+		return claimMapper.toClaimResponse(assignedClaim);
 	}
 
 	@Transactional(readOnly = true)

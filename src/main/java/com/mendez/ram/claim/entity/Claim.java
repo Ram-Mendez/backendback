@@ -15,6 +15,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import org.hibernate.annotations.OptimisticLock;
 
 @Entity
 @Table(name = "claims")
@@ -42,6 +43,7 @@ public class Claim {
 	private ClaimPriority priority;
 
 	@Column(name = "due_at")
+	@OptimisticLock(excluded = true)
 	private Instant dueAt;
 
 	@ManyToOne(fetch = FetchType.LAZY)
@@ -66,6 +68,7 @@ public class Claim {
 	private Instant createdAt;
 
 	@Column(name = "updated_at", nullable = false)
+	@OptimisticLock(excluded = true)
 	private Instant updatedAt;
 
 	@Version

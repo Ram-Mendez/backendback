@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.mendez.ram.TestcontainersConfiguration;
 import com.mendez.ram.auth.dto.AuthTokenResponse;
 import com.mendez.ram.auth.dto.LoginRequest;
+import com.mendez.ram.auth.dto.RefreshTokenRequest;
 import com.mendez.ram.claim.dto.ChangeClaimStatusRequest;
 import com.mendez.ram.claim.dto.CreateClaimRequest;
 import com.mendez.ram.claim.dto.UpdateClaimRequest;
@@ -91,6 +92,45 @@ class ClaimControllerIntegrationTest {
 								new ChangeClaimStatusRequest(ClaimStatus.REGISTERED, version))))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.status").value("REGISTERED"));
+	}
+
+	@Test
+	void rotatedAccessTokenCanUpdateClaimAndContinueRotating() throws Exception {
+		AuthTokenResponse firstPair = loginAndRead("user@local.dev", "DevUser123!");
+		MvcResult createdClaimResult = createClaim(firstPair.accessToken(), "Rotated access claim")
+				.andExpect(status().isCreated())
+				.andReturn();
+		Long claimId = extractClaimId(createdClaimResult);
+		Long claimVersion = extractLong(createdClaimResult, "version");
+
+		AuthTokenResponse secondPair = refreshAndRead(firstPair.refreshToken());
+		MvcResult firstUpdateResult = updateClaim(secondPair.accessToken(), claimId, claimVersion,
+				"Rotated access update 1")
+				.andExpect(status().isOk())
+				.andReturn();
+		claimVersion = extractLong(firstUpdateResult, "version");
+
+		mockMvc.perform(post("/api/auth/refresh")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(objectMapper.writeValueAsString(new RefreshTokenRequest(firstPair.refreshToken()))))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"));
+
+		MvcResult secondUpdateResult = updateClaim(secondPair.accessToken(), claimId, claimVersion,
+				"Rotated access update 2")
+				.andExpect(status().isOk())
+				.andReturn();
+		claimVersion = extractLong(secondUpdateResult, "version");
+
+		AuthTokenResponse thirdPair = refreshAndRead(secondPair.refreshToken());
+		updateClaim(thirdPair.accessToken(), claimId, claimVersion, "Rotated access update 3")
+				.andExpect(status().isOk());
+
+		mockMvc.perform(post("/api/auth/refresh")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(objectMapper.writeValueAsString(new RefreshTokenRequest(secondPair.refreshToken()))))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"));
 	}
 
 	@Test
@@ -317,6 +357,21 @@ class ClaimControllerIntegrationTest {
 						"Cliente Test"))));
 	}
 
+	private org.springframework.test.web.servlet.ResultActions updateClaim(
+			String token,
+			Long claimId,
+			Long version,
+			String title) throws Exception {
+		return mockMvc.perform(put("/api/v1/claims/" + claimId)
+				.header(HttpHeaders.AUTHORIZATION, bearer(token))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(new UpdateClaimRequest(
+						title,
+						"Reclamacion actualizada con un access token rotado.",
+						"Cliente Test",
+						version))));
+	}
+
 	private org.springframework.test.web.servlet.ResultActions changeStatus(String token, Long claimId, ClaimStatus status,
 			Long version) throws Exception {
 		return mockMvc.perform(patch("/api/v1/claims/" + claimId + "/status")
@@ -354,6 +409,24 @@ class ClaimControllerIntegrationTest {
 		return objectMapper.readValue(
 				authenticationResult.getResponse().getContentAsString(),
 				AuthTokenResponse.class).accessToken();
+	}
+
+	private AuthTokenResponse loginAndRead(String email, String password) throws Exception {
+		MvcResult authenticationResult = mockMvc.perform(post("/api/auth/login")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(objectMapper.writeValueAsString(new LoginRequest(email, password))))
+				.andExpect(status().isOk())
+				.andReturn();
+		return objectMapper.readValue(authenticationResult.getResponse().getContentAsString(), AuthTokenResponse.class);
+	}
+
+	private AuthTokenResponse refreshAndRead(String refreshToken) throws Exception {
+		MvcResult refreshResult = mockMvc.perform(post("/api/auth/refresh")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(objectMapper.writeValueAsString(new RefreshTokenRequest(refreshToken))))
+				.andExpect(status().isOk())
+				.andReturn();
+		return objectMapper.readValue(refreshResult.getResponse().getContentAsString(), AuthTokenResponse.class);
 	}
 
 	private Long extractClaimId(MvcResult createClaimResult) {

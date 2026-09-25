@@ -145,7 +145,7 @@ public class AttachmentService {
 		claimAttachmentRepository.flush();
 		claimService.recordClaimAttachmentEvent(
 				claim, actingUser, ClaimHistoryEventType.ATTACHMENT_DELETED, "attachmentId=" + attachmentId);
-		deleteStorageAfterCommit(storageKey, attachment.getId(), claimId);
+		scheduleStorageDeletion(storageKey, attachment.getId(), claimId);
 		LOGGER.info("Attachment {} deleted from claim {} by user {}", attachment.getId(), claimId, principal.id());
 	}
 
@@ -368,14 +368,14 @@ public class AttachmentService {
 		}
 	}
 
-	private void deleteStorageAfterCommit(String storageKey, UUID attachmentId, Long claimId) {
+	private void scheduleStorageDeletion(String storageKey, UUID attachmentId, Long claimId) {
 		if (!TransactionSynchronizationManager.isSynchronizationActive()) {
 			deleteAttachmentStorageSafely(storageKey, attachmentId, claimId);
 			return;
 		}
 		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
 			@Override
-			public void afterCommit() {
+			public void beforeCommit(boolean readOnly) {
 				deleteAttachmentStorageSafely(storageKey, attachmentId, claimId);
 			}
 		});

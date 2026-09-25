@@ -2,11 +2,22 @@ package com.mendez.ram.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.mendez.ram.TestcontainersConfiguration;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Base64;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.mendez.ram.auth.dto.AuthTokenResponse;
 import com.mendez.ram.auth.dto.LoginRequest;
 import com.mendez.ram.auth.dto.RefreshTokenRequest;
@@ -31,6 +42,66 @@ import tools.jackson.databind.ObjectMapper;
 @ActiveProfiles("test")
 @Testcontainers(disabledWithoutDocker = true)
 class AuthControllerIntegrationTest {
+
+	@MockitoBean
+	private Clock clock;
+
+	@BeforeEach
+	void resetClock() {
+		when(clock.getZone()).thenReturn(ZoneOffset.UTC);
+		when(clock.instant()).thenReturn(Instant.parse("2026-09-25T01:00:00Z"));
+	}
+
+	@Test
+	void accessTokenLasts45Minutes() throws Exception {
+		AuthTokenResponse pair = loginAndRead("manager@local.dev", "DevManager123!");
+		var payload = objectMapper.readTree(Base64.getUrlDecoder().decode(pair.accessToken().split("\\.")[1]));
+		assertThat(pair.expiresIn()).isEqualTo(2700);
+		assertThat(payload.get("exp").asLong() - payload.get("iat").asLong()).isEqualTo(2700);
+		assertThat(pair.expiresAt().toEpochSecond()).isEqualTo(payload.get("exp").asLong());
+	}
+
+	@ParameterizedTest
+	@ValueSource(booleans = { false, true })
+	void refreshRemainsUsableAcrossThreeExpirations(boolean sendExpiredAccessHeader) throws Exception {
+		AuthTokenResponse pair = loginAndRead("manager@local.dev", "DevManager123!");
+		var usedRefreshTokens = new ArrayList<String>();
+		assertProtectedAccess(pair);
+		for (int rotation = 0; rotation < 3; rotation++) {
+			when(clock.instant()).thenReturn(pair.expiresAt().toInstant().plusSeconds(1));
+			mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + pair.accessToken()))
+					.andExpect(status().isUnauthorized());
+			usedRefreshTokens.add(pair.refreshToken());
+			var request = post("/api/auth/refresh")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(objectMapper.writeValueAsString(new RefreshTokenRequest(pair.refreshToken())));
+			if (sendExpiredAccessHeader) {
+				request.header("Authorization", "Bearer " + pair.accessToken());
+			}
+			MvcResult result = mockMvc.perform(request).andExpect(status().isOk()).andReturn();
+			AuthTokenResponse nextPair = objectMapper.readValue(result.getResponse().getContentAsString(), AuthTokenResponse.class);
+			assertThat(nextPair.accessToken()).isNotEqualTo(pair.accessToken());
+			assertThat(usedRefreshTokens).doesNotContain(nextPair.refreshToken());
+			assertProtectedAccess(nextPair);
+			for (String usedRefresh : usedRefreshTokens) {
+				mockMvc.perform(post("/api/auth/refresh")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(objectMapper.writeValueAsString(new RefreshTokenRequest(usedRefresh))))
+						.andExpect(status().isUnauthorized())
+						.andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"));
+			}
+			pair = nextPair;
+		}
+	}
+
+	private void assertProtectedAccess(AuthTokenResponse pair) throws Exception {
+		assertThat(pair.expiresIn()).isEqualTo(2700);
+		var payload = objectMapper.readTree(Base64.getUrlDecoder().decode(pair.accessToken().split("\\.")[1]));
+		assertThat(payload.get("exp").asLong() - payload.get("iat").asLong()).isEqualTo(2700);
+		mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + pair.accessToken()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.email").value("manager@local.dev"));
+	}
 
 	@Autowired
 	private MockMvc mockMvc;

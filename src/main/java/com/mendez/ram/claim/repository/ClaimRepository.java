@@ -1,5 +1,6 @@
 package com.mendez.ram.claim.repository;
 
+import java.util.List;
 import java.util.Optional;
 
 import com.mendez.ram.claim.entity.Claim;
@@ -19,6 +20,9 @@ public interface ClaimRepository extends JpaRepository<Claim, Long>, JpaSpecific
 	@Override
 	@EntityGraph(attributePaths = { "createdBy", "updatedBy", "assignedTo" })
 	Page<Claim> findAll(Specification<Claim> specification, Pageable pageable);
+
+	@EntityGraph(attributePaths = { "createdBy", "updatedBy", "assignedTo" })
+	List<Claim> findByIdIn(List<Long> ids, Pageable pageable);
 
 	@EntityGraph(attributePaths = { "createdBy", "updatedBy", "assignedTo" })
 	Optional<Claim> findWithUsersById(Long id);

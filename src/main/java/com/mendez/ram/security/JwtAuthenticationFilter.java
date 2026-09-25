@@ -31,6 +31,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	}
 
 	@Override
+	protected boolean shouldNotFilter(HttpServletRequest request) {
+		// Refresh authenticates with its own token, even when an expired access header is present.
+		return "POST".equals(request.getMethod())
+				&& (request.getContextPath() + "/api/auth/refresh").equals(request.getRequestURI());
+	}
+
+	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
 		String token = resolveBearerToken(request);
