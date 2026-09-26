@@ -34,7 +34,7 @@ public class ClaimAssignmentService {
 		this.clock = clock;
 	}
 
-	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	@Transactional
 	public Claim assignClaim(Long claimId, Long expectedVersion, Long assigneeId, Long actingUserId) {
 		Claim claim = claimRepository.findWithUsersById(claimId)
 				.orElseThrow(() -> new ApiException(

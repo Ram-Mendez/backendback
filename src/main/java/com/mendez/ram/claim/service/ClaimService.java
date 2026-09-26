@@ -339,12 +339,17 @@ public class ClaimService {
 			Long previousAssigneeId,
 			AuthUser assignee) {
 		String assignmentHistoryData = "from=" + previousAssigneeId + ",to=" + assignee.getId();
+
+
 		recordClaimHistory(
 				claim,
 				actingUser,
 				ClaimHistoryEventType.ASSIGNED,
 				assignmentHistoryData);
+
 	}
+
+
 
 	private ClaimHistoryResponse toClaimHistoryResponse(ClaimHistory claimHistoryEntry) {
 		return new ClaimHistoryResponse(
