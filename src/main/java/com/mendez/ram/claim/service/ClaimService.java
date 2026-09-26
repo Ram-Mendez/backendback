@@ -125,7 +125,7 @@ public class ClaimService {
 				specification,
 				query -> query.as(ClaimIdView.class).page(pageable));
 		List<Long> claimIds = matchingIds.getContent().stream().map(ClaimIdView::getId).toList();
-		List<Claim> matchingClaims = claimRepository.findByIdIn(claimIds, pageable);
+		List<Claim> matchingClaims = claimRepository.findByIdIn(claimIds);
 		return new PageImpl<>(matchingClaims, pageable, matchingIds.getTotalElements());
 	}
 

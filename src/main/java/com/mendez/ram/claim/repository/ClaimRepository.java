@@ -25,6 +25,9 @@ public interface ClaimRepository extends JpaRepository<Claim, Long>, JpaSpecific
 	List<Claim> findByIdIn(List<Long> ids, Pageable pageable);
 
 	@EntityGraph(attributePaths = { "createdBy", "updatedBy", "assignedTo" })
+	List<Claim> findByIdIn(List<Long> ids);
+
+	@EntityGraph(attributePaths = { "createdBy", "updatedBy", "assignedTo" })
 	Optional<Claim> findWithUsersById(Long id);
 
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
