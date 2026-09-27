@@ -368,17 +368,24 @@ public class AttachmentService {
 		}
 	}
 
-	private void scheduleStorageDeletion(String storageKey, UUID attachmentId, Long claimId) {
+	private void scheduleStorageDeletion(
+			String storageKey,
+			UUID attachmentId,
+			Long claimId) {
+
 		if (!TransactionSynchronizationManager.isSynchronizationActive()) {
 			deleteAttachmentStorageSafely(storageKey, attachmentId, claimId);
 			return;
 		}
-		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-			@Override
-			public void beforeCommit(boolean readOnly) {
-				deleteAttachmentStorageSafely(storageKey, attachmentId, claimId);
-			}
-		});
+
+		TransactionSynchronizationManager.registerSynchronization(
+				new TransactionSynchronization() {
+
+					@Override
+					public void afterCommit() {
+						deleteAttachmentStorageSafely(storageKey, attachmentId, claimId);
+					}
+				});
 	}
 
 	private void deleteAttachmentStorageSafely(String storageKey, UUID attachmentId, Long claimId) {
