@@ -22,14 +22,23 @@ public final class ClaimSpecifications {
 	public static Specification<Claim> matchingClaimSearchCriteria(ClaimSearchCriteria criteria) {
 		return Specification
 				.where(searchTermMatches(criteria.search()))
-				.and(statusMatches(criteria.status()))
+				.and(classificationMatches(criteria.status(), criteria.priority()))
 				.and(fieldContainsIgnoreCase("reference", criteria.reference()))
 				.and(createdByUserMatches(criteria.createdBy()))
 				.and(userAssociationMatches("assignedTo", criteria.assignedTo()))
-				.and(priorityMatches(criteria.priority()))
 				.and(overdueClaims(criteria.overdue()))
 				.and(createdOnOrAfter(criteria.createdFrom()))
 				.and(createdOnOrBefore(criteria.createdTo()));
+	}
+
+	private static Specification<Claim> classificationMatches(ClaimStatus status, ClaimPriority priority) {
+		if (status == null) {
+			return priorityMatches(priority);
+		}
+		if (priority == null) {
+			return statusMatches(status);
+		}
+		return statusMatches(status).or(priorityMatches(priority));
 	}
 
 	private static Specification<Claim> statusMatches(ClaimStatus status) {

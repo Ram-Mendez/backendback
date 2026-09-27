@@ -26,7 +26,6 @@ import com.mendez.ram.claim.entity.ClaimStatus;
 import com.mendez.ram.claim.mapper.ClaimMapper;
 import com.mendez.ram.claim.repository.ClaimCommentRepository;
 import com.mendez.ram.claim.repository.ClaimHistoryRepository;
-import com.mendez.ram.claim.repository.ClaimIdView;
 import com.mendez.ram.claim.repository.ClaimRepository;
 import com.mendez.ram.claim.repository.ClaimSpecifications;
 import com.mendez.ram.exception.ApiException;
@@ -36,18 +35,15 @@ import com.mendez.ram.security.entity.SecurityPermission;
 import com.mendez.ram.security.entity.SecurityRole;
 import com.mendez.ram.security.repository.AuthUserRepository;
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.LockModeType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 
 @Service
 public class ClaimService {
@@ -108,25 +104,9 @@ public class ClaimService {
 		if (!canReviewClaims(principal)) {
 			specification = specification.and(ClaimSpecifications.createdById(principal.id()));
 		}
-		Page<ClaimSummaryResponse> claimSummaryPage = findMatchingClaims(claimSearchCriteria, specification, pageable)
+		Page<ClaimSummaryResponse> claimSummaryPage = claimRepository.findAll(specification, pageable)
 				.map(claimMapper::toClaimSummaryResponse);
 		return PageResponse.from(claimSummaryPage);
-	}
-
-	private Page<Claim> findMatchingClaims(
-			ClaimSearchCriteria criteria,
-			Specification<Claim> specification,
-			Pageable pageable) {
-		if (!StringUtils.hasText(criteria.search()) || !pageable.isPaged() || !pageable.getSort().isSorted()) {
-			return claimRepository.findAll(specification, pageable);
-		}
-
-		Page<ClaimIdView> matchingIds = claimRepository.findBy(
-				specification,
-				query -> query.as(ClaimIdView.class).page(pageable));
-		List<Long> claimIds = matchingIds.getContent().stream().map(ClaimIdView::getId).toList();
-		List<Claim> matchingClaims = claimRepository.findByIdIn(claimIds);
-		return new PageImpl<>(matchingClaims, pageable, matchingIds.getTotalElements());
 	}
 
 	@Transactional(readOnly = true)
@@ -189,7 +169,6 @@ public class ClaimService {
 
 		ensureUserCanChangeClaimStatus(claim, targetStatus, principal);
 		AuthUser actingUser = findAuthenticatedUser(principal);
-		entityManager.refresh(claim, LockModeType.PESSIMISTIC_WRITE);
 		claim.changeStatus(targetStatus, actingUser, Instant.now(clock));
 		recordClaimHistory(
 				claim,
@@ -240,7 +219,7 @@ public class ClaimService {
 
 	@Transactional(readOnly = true)
 	public List<ClaimHistoryResponse> loadClaimHistory(Long id, AuthenticatedUser principal) {
-		findViewableClaim(id, principal);
+		findClaimEntityById(id);
 
 		return claimHistoryRepository.findByClaimIdOrderByOccurredAtAscIdAsc(id)
 				.stream()
@@ -266,7 +245,7 @@ public class ClaimService {
 		AuthUser actingUser = findAuthenticatedUser(principal);
 		ClaimComment comment = new ClaimComment(
 				claim,
-				actingUser,
+				claim.getCreatedBy(),
 				request.body().trim(),
 				Instant.now(clock));
 		ClaimComment savedComment = claimCommentRepository.save(comment);

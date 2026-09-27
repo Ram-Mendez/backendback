@@ -148,7 +148,7 @@ public class ClaimController {
 	}
 
 	@GetMapping("/reviewers")
-	@PreAuthorize("hasAnyRole('MANAGER', 'ADMIN')")
+	@PreAuthorize("hasAnyAuthority('PERM_CLAIM_REVIEW','PERM_CLAIM_ADMIN')")
 	@Operation(operationId = "reviewers")
 	public List<ReviewerResponse> loadEligibleReviewers(
 			@AuthenticationPrincipal AuthenticatedUser principal) {
