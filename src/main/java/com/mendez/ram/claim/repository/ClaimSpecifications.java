@@ -38,7 +38,7 @@ public final class ClaimSpecifications {
 		if (priority == null) {
 			return statusMatches(status);
 		}
-		return statusMatches(status).or(priorityMatches(priority));
+		return statusMatches(status).and(priorityMatches(priority));
 	}
 
 	private static Specification<Claim> statusMatches(ClaimStatus status) {
