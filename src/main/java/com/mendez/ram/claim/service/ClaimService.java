@@ -219,7 +219,8 @@ public class ClaimService {
 
 	@Transactional(readOnly = true)
 	public List<ClaimHistoryResponse> loadClaimHistory(Long id, AuthenticatedUser principal) {
-		findClaimEntityById(id);
+		Claim claim = findClaimEntityById(id);
+		ensureUserCanViewClaim(claim, principal);
 
 		return claimHistoryRepository.findByClaimIdOrderByOccurredAtAscIdAsc(id)
 				.stream()
