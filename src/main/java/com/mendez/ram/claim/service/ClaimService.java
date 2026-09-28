@@ -243,11 +243,22 @@ public class ClaimService {
 		ensureUserCanViewClaim(claim, principal);
 
 		AuthUser actingUser = findAuthenticatedUser(principal);
+
+		String body = request.body().trim();
+		if (body.isEmpty()) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"COMMENT_BODY_REQUIRED",
+					"Comment body cannot be empty."
+			);
+		}
+
 		ClaimComment comment = new ClaimComment(
 				claim,
 				claim.getCreatedBy(),
-				request.body().trim(),
-				Instant.now(clock));
+				body,
+				Instant.now(clock)
+		);
 		ClaimComment savedComment = claimCommentRepository.save(comment);
 
 		LOGGER.info(
