@@ -256,7 +256,7 @@ public class ClaimService {
 
 		ClaimComment comment = new ClaimComment(
 				claim,
-				claim.getCreatedBy(),
+				actingUser,
 				body,
 				Instant.now(clock)
 		);
