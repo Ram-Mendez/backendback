@@ -202,11 +202,10 @@ public class ClaimService {
 					"La reclamación ha sido modificada por otro usuario."
 			);
 		}
-
+		Long oldAssigneeId = currentClaimAssigneeId(claim);
 		Claim assignedClaim = claimAssignmentService.assignClaim(
 				id, request.version(), assignee.getId(), actingUser.getId());
-		Long previousAssigneeId = currentClaimAssigneeId(assignedClaim);
-		recordClaimAssignmentHistory(assignedClaim, actingUser, previousAssigneeId, assignee);
+		recordClaimAssignmentHistory(assignedClaim, actingUser, oldAssigneeId, assignee);
 
 		LOGGER.info(
 				"Claim {} assigned to user {} by user {}",
