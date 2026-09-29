@@ -146,7 +146,7 @@ public final class ClaimSpecifications {
 	}
 
 	private static Specification<Claim> searchTermMatches(String searchTerm) {
-		return (root, query, builder) -> {
+		return (root, query,builder) -> {
 			if (!StringUtils.hasText(searchTerm)) {
 				return builder.conjunction();
 			}
@@ -154,12 +154,13 @@ public final class ClaimSpecifications {
 			String containsPattern = containsPattern(searchTerm);
 			var createdByUser = root.join("createdBy", JoinType.LEFT);
 			return builder.or(
-					builder.like(builder.lower(root.get("reference")), containsPattern),
-					builder.like(builder.lower(root.get("title")), containsPattern),
-					builder.like(builder.lower(root.get("description")), containsPattern),
-					builder.like(builder.lower(root.get("claimantName")), containsPattern),
-					builder.like(builder.lower(createdByUser.get("username")), containsPattern),
-					builder.like(builder.lower(createdByUser.get("email")), containsPattern));
+					builder.like(builder.lower(root.get("reference")), containsPattern, '\\'),
+					builder.like(builder.lower(root.get("title")), containsPattern, '\\'),
+					builder.like(builder.lower(root.get("description")), containsPattern, '\\'),
+					builder.like(builder.lower(root.get("claimantName")), containsPattern, '\\'),
+					builder.like(builder.lower(createdByUser.get("username")), containsPattern, '\\'),
+					builder.like(builder.lower(createdByUser.get("email")), containsPattern, '\\')
+			);
 		};
 	}
 
@@ -187,7 +188,14 @@ public final class ClaimSpecifications {
 	}
 
 	private static String containsPattern(String searchText) {
-		return "%" + searchText.trim().toLowerCase(Locale.ROOT) + "%";
+		String escaped = searchText
+				.trim()
+				.toLowerCase(Locale.ROOT)
+				.replace("\\", "\\\\")
+				.replace("%", "\\%")
+				.replace("_", "\\_");
+
+		return "%" + escaped + "%";
 	}
 
 	private static Instant utcStartOfDay(LocalDate date) {
