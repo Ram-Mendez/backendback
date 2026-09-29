@@ -231,7 +231,7 @@ public class ClaimService {
 	public List<ClaimCommentResponse> loadClaimComments(Long id, AuthenticatedUser principal) {
 		findViewableClaim(id, principal);
 
-		return claimCommentRepository.findByClaimIdOrderByCreatedAtDescIdDesc(id)
+		return claimCommentRepository.findByClaimIdOrderByCreatedAtAscIdAsc(id)
 				.stream()
 				.map(this::toClaimCommentResponse)
 				.toList();
