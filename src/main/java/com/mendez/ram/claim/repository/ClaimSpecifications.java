@@ -157,6 +157,7 @@ public final class ClaimSpecifications {
 					builder.like(builder.lower(root.get("reference")), containsPattern),
 					builder.like(builder.lower(root.get("title")), containsPattern),
 					builder.like(builder.lower(root.get("description")), containsPattern),
+					builder.like(builder.lower(root.get("claimantName")), containsPattern),
 					builder.like(builder.lower(createdByUser.get("username")), containsPattern),
 					builder.like(builder.lower(createdByUser.get("email")), containsPattern));
 		};
