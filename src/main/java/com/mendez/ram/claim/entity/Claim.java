@@ -196,6 +196,10 @@ public class Claim {
 
 	public void changeStatus(ClaimStatus newStatus, AuthUser updatedBy, Instant statusChangeTime) {
 		this.status = newStatus;
+		if (newStatus == ClaimStatus.REGISTERED) {
+			this.assignedTo = null;
+			this.assignedAt = null;
+		}
 		this.updatedBy = updatedBy;
 		this.updatedAt = statusChangeTime;
 	}

@@ -12,7 +12,8 @@ public interface AuthUserRepository extends JpaRepository<AuthUser, Long> {
 	@Query("select distinct authUser from AuthUser authUser "
 			+ "join authUser.roles role join role.permissions permission "
 			+ "where authUser.enabled = true "
-			+ "and (permission.code = 'PERM_CLAIM_REVIEW' or role.code in ('ROLE_ADMIN','ROLE_MANAGER')) "
+			+ "and (permission.code in ('PERM_CLAIM_READ','PERM_CLAIM_REVIEW') "
+			+ "or role.code in ('ROLE_ADMIN','ROLE_MANAGER')) "
 			+ "order by authUser.username")
 	java.util.List<AuthUser> findEligibleReviewers();
 

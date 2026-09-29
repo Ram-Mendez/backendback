@@ -10,6 +10,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
 import com.mendez.ram.TestcontainersConfiguration;
 import com.mendez.ram.auth.dto.AuthTokenResponse;
 import com.mendez.ram.auth.dto.LoginRequest;
@@ -18,6 +26,8 @@ import com.mendez.ram.claim.dto.ChangeClaimStatusRequest;
 import com.mendez.ram.claim.dto.CreateClaimRequest;
 import com.mendez.ram.claim.dto.UpdateClaimRequest;
 import com.mendez.ram.claim.entity.ClaimStatus;
+import com.mendez.ram.claim.entity.ClaimPriority;
+import com.mendez.ram.claim.dto.ClaimResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -216,21 +226,228 @@ class ClaimControllerIntegrationTest {
 	@Test
 	void listSupportsFiltersPaginationAndSorting() throws Exception {
 		String adminToken = accessToken("admin@local.dev", "DevAdmin123!");
-		MvcResult createdClaimResult = createClaim(adminToken, "Filter unique claim")
-				.andExpect(status().isCreated())
-				.andReturn();
-		String reference = extractText(createdClaimResult, "reference");
+		String marker = "Pagination-" + UUID.randomUUID();
+		List<Long> expectedIds = new ArrayList<>();
+		for (String suffix : List.of("A", "B", "C", "D", "E")) {
+			expectedIds.add(extractClaimId(createClaim(adminToken, marker + suffix)
+					.andExpect(status().isCreated()).andReturn()));
+		}
+		List<Long> actualIds = new ArrayList<>();
+		for (int page = 0; page < 3; page++) {
+			MvcResult result = mockMvc.perform(get("/api/v1/claims")
+					.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+					.param("search", marker).param("status", "DRAFT")
+					.param("page", Integer.toString(page)).param("size", "2")
+					.param("sort", "title,asc"))
+					.andExpect(status().isOk())
+					.andExpect(jsonPath("$.totalElements").value(5))
+					.andExpect(jsonPath("$.totalPages").value(3))
+					.andExpect(jsonPath("$.content.length()").value(page == 2 ? 1 : 2))
+					.andReturn();
+			for (var claim : objectMapper.readTree(result.getResponse().getContentAsString()).get("content")) {
+				actualIds.add(claim.get("id").asLong());
+			}
+		}
+		assertThat(actualIds).containsExactlyElementsOf(expectedIds);
+	}
 
-		mockMvc.perform(get("/api/v1/claims")
-						.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
-						.param("reference", reference)
-						.param("status", "DRAFT")
-						.param("page", "0")
-						.param("size", "5")
-						.param("sort", "createdAt,desc"))
+	@Test
+	void pendingCorrectionMustBeRegisteredAgainBeforeReview() throws Exception {
+		String token = accessToken("manager@local.dev", "DevManager123!");
+		MvcResult claim = createClaim(token, "Correction lifecycle").andExpect(status().isCreated()).andReturn();
+		Long id = extractClaimId(claim);
+		for (ClaimStatus next : List.of(ClaimStatus.REGISTERED, ClaimStatus.UNDER_REVIEW, ClaimStatus.PENDING_CORRECTION)) {
+			claim = changeStatus(token, id, next, extractLong(claim, "version"))
+					.andExpect(status().isOk()).andReturn();
+		}
+		Long version = extractLong(claim, "version");
+		changeStatus(token, id, ClaimStatus.ACCEPTED, version)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.code").value("INVALID_CLAIM_STATUS_TRANSITION"));
+		mockMvc.perform(get("/api/v1/claims/" + id).header(HttpHeaders.AUTHORIZATION, bearer(token)))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.content[0].reference").value(reference))
-				.andExpect(jsonPath("$.totalElements").value(1));
+				.andExpect(jsonPath("$.status").value("PENDING_CORRECTION"))
+				.andExpect(jsonPath("$.version").value(version));
+		changeStatus(token, id, ClaimStatus.REGISTERED, version)
+				.andExpect(status().isOk()).andExpect(jsonPath("$.status").value("REGISTERED"));
+	}
+
+	@Test
+	void sameDayCreatedFromAndCreatedToIncludeTheLastInstantOfThatDate() throws Exception {
+		String token = accessToken("user@local.dev", "DevUser123!");
+		String marker = "Date-boundary-" + UUID.randomUUID();
+		List<Long> ids = new ArrayList<>();
+		List<String> timestamps = List.of("2026-06-14T23:59:59.999999Z", "2026-06-15T00:00:00Z",
+				"2026-06-15T23:59:59.999999Z", "2026-06-16T00:00:00Z");
+		for (int index = 0; index < timestamps.size(); index++) {
+			Long id = extractClaimId(createClaim(token, marker + index).andExpect(status().isCreated()).andReturn());
+			ids.add(id);
+			jdbcTemplate.update("update claims set created_at = cast(? as timestamptz) where id = ?", timestamps.get(index), id);
+		}
+		mockMvc.perform(get("/api/v1/claims").header(HttpHeaders.AUTHORIZATION, bearer(token))
+				.param("search", marker).param("createdFrom", "2026-06-15").param("createdTo", "2026-06-15")
+				.param("sort", "createdAt,asc"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+				.andExpect(jsonPath("$.content.length()").value(2))
+				.andExpect(jsonPath("$.content[0].id").value(ids.get(1)))
+				.andExpect(jsonPath("$.content[1].id").value(ids.get(2)));
+	}
+
+	@Test
+	void omittedAndNullPriorityPreserveExistingPriority() throws Exception {
+		String token = accessToken("user@local.dev", "DevUser123!");
+		MvcResult created = mockMvc.perform(post("/api/v1/claims")
+				.header(HttpHeaders.AUTHORIZATION, bearer(token)).contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(new CreateClaimRequest(
+						"Keep priority", "Priority regression", null, ClaimPriority.HIGH, null))))
+				.andExpect(status().isCreated()).andReturn();
+		Long id = extractClaimId(created);
+		Long version = extractLong(created, "version");
+		for (String priorityField : List.of("", ",\"priority\":null")) {
+			MvcResult updated = mockMvc.perform(put("/api/v1/claims/" + id)
+					.header(HttpHeaders.AUTHORIZATION, bearer(token)).contentType(MediaType.APPLICATION_JSON)
+					.content("{\"title\":\"Keep priority\",\"description\":\"Updated\",\"version\":" + version + priorityField + "}"))
+					.andExpect(status().isOk()).andExpect(jsonPath("$.priority").value("HIGH")).andReturn();
+			version = extractLong(updated, "version");
+			mockMvc.perform(get("/api/v1/claims/" + id).header(HttpHeaders.AUTHORIZATION, bearer(token)))
+					.andExpect(status().isOk()).andExpect(jsonPath("$.priority").value("HIGH"));
+		}
+	}
+
+	@Test
+	void deadlineOnlyEditRejectsStaleUpdateAndPreservesDeadline() throws Exception {
+		String token = accessToken("user@local.dev", "DevUser123!");
+		MvcResult created = createClaim(token, "Deadline version").andExpect(status().isCreated()).andReturn();
+		Long id = extractClaimId(created);
+		MvcResult primed = updateClaim(token, id, extractLong(created, "version"), "Deadline version")
+				.andExpect(status().isOk()).andReturn();
+		ClaimResponse original = objectMapper.readValue(primed.getResponse().getContentAsString(), ClaimResponse.class);
+		Instant deadline = Instant.parse("2030-01-15T12:00:00Z");
+		MvcResult updated = mockMvc.perform(put("/api/v1/claims/" + id)
+				.header(HttpHeaders.AUTHORIZATION, bearer(token)).contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(new UpdateClaimRequest(original.title(), original.description(),
+						original.claimantName(), original.priority(), deadline, original.version()))))
+				.andExpect(status().isOk()).andReturn();
+		assertThat(extractLong(updated, "version")).isGreaterThan(original.version());
+		updateClaim(token, id, original.version(), "Stale title")
+				.andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("OPTIMISTIC_LOCK_CONFLICT"));
+		mockMvc.perform(get("/api/v1/claims/" + id).header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.dueAt").value(deadline.toString()))
+				.andExpect(jsonPath("$.title").value(original.title()))
+				.andExpect(jsonPath("$.version").value(extractLong(updated, "version")));
+	}
+
+	@Test
+	void failedAssignmentHistoryRollsBackAssigneeAndVersion() throws Exception {
+		String token = accessToken("manager@local.dev", "DevManager123!");
+		MvcResult created = createClaim(token, "Assignment rollback").andExpect(status().isCreated()).andReturn();
+		Long id = extractClaimId(created);
+		Long version = extractLong(created, "version");
+		ReviewerTestData reviewer = firstEligibleReviewer(token);
+		// A database failure after the assignment flush must roll back the entire HTTP transaction.
+		jdbcTemplate.execute("alter table claim_history add constraint test_assignment_history_failure "
+				+ "check (claim_id <> " + id + " or event_type <> 'ASSIGNED')");
+		try {
+			MvcResult failed = assignClaim(token, id, reviewer.id(), version)
+					.andExpect(status().isConflict())
+					.andExpect(jsonPath("$.code").value("DATA_INTEGRITY_CONFLICT")).andReturn();
+			assertThat(failed.getResolvedException()).hasStackTraceContaining("test_assignment_history_failure");
+		} finally {
+			jdbcTemplate.execute("alter table claim_history drop constraint test_assignment_history_failure");
+		}
+		mockMvc.perform(get("/api/v1/claims/" + id).header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.assignedToId").isEmpty())
+				.andExpect(jsonPath("$.version").value(version));
+		mockMvc.perform(get("/api/v1/claims/" + id + "/history").header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+				.andExpect(jsonPath("$[0].eventType").value("CREATED"));
+		assignClaim(token, id, reviewer.id(), version).andExpect(status().isOk());
+	}
+
+	@Test
+	void concurrentStatusChangesAcceptOnlyOneTransitionFromTheSameVersion() throws Exception {
+		String token = accessToken("manager@local.dev", "DevManager123!");
+		MvcResult claim = createClaim(token, "Concurrent review").andExpect(status().isCreated()).andReturn();
+		Long id = extractClaimId(claim);
+		for (ClaimStatus next : List.of(ClaimStatus.REGISTERED, ClaimStatus.UNDER_REVIEW)) {
+			claim = changeStatus(token, id, next, extractLong(claim, "version")).andExpect(status().isOk()).andReturn();
+		}
+		Long version = extractLong(claim, "version");
+		CountDownLatch ready = new CountDownLatch(2);
+		CountDownLatch start = new CountDownLatch(1);
+		List<MvcResult> results = new ArrayList<>();
+		try (var executor = Executors.newFixedThreadPool(2)) {
+			var accepted = executor.submit(() -> concurrentStatusChange(token, id, version, ClaimStatus.ACCEPTED, ready, start));
+			var correction = executor.submit(() -> concurrentStatusChange(token, id, version, ClaimStatus.PENDING_CORRECTION, ready, start));
+			try {
+				assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+			} finally {
+				start.countDown();
+			}
+			results.add(accepted.get(20, TimeUnit.SECONDS));
+			results.add(correction.get(20, TimeUnit.SECONDS));
+		}
+		assertThat(results).extracting(result -> result.getResponse().getStatus()).containsExactlyInAnyOrder(200, 409);
+		MvcResult winner = results.stream().filter(result -> result.getResponse().getStatus() == 200).findFirst().orElseThrow();
+		MvcResult loser = results.stream().filter(result -> result.getResponse().getStatus() == 409).findFirst().orElseThrow();
+		assertThat(extractText(loser, "code")).isEqualTo("OPTIMISTIC_LOCK_CONFLICT");
+		String finalStatus = extractText(winner, "status");
+		mockMvc.perform(get("/api/v1/claims/" + id).header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.status").value(finalStatus))
+				.andExpect(jsonPath("$.version").value(version + 1));
+		mockMvc.perform(get("/api/v1/claims/" + id + "/history").header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(4))
+				.andExpect(jsonPath("$[3].eventData").value("UNDER_REVIEW -> " + finalStatus));
+	}
+
+	private MvcResult concurrentStatusChange(String token, Long id, Long version, ClaimStatus next,
+			CountDownLatch ready, CountDownLatch start) throws Exception {
+		ready.countDown();
+		assertThat(start.await(10, TimeUnit.SECONDS)).isTrue();
+		return changeStatus(token, id, next, version).andReturn();
+	}
+
+	@Test
+	void customReviewPermissionAllowsReviewAndReviewerListingWithoutManagerRole() throws Exception {
+		String manager = accessToken("manager@local.dev", "DevManager123!");
+		MvcResult created = createClaim(manager, "Custom reviewer").andExpect(status().isCreated()).andReturn();
+		Long id = extractClaimId(created);
+		MvcResult registered = changeStatus(manager, id, ClaimStatus.REGISTERED, extractLong(created, "version"))
+				.andExpect(status().isOk()).andReturn();
+		String suffix = UUID.randomUUID().toString().replace("-", "");
+		String email = suffix + "@test.dev";
+		Long roleId = jdbcTemplate.queryForObject(
+				"insert into security_role(code, description) values (?, 'Regression reviewer') returning id",
+				Long.class, "ROLE_" + suffix.toUpperCase());
+		Long userId = null;
+		try {
+			jdbcTemplate.update("insert into security_role_permission(role_id, permission_id) "
+					+ "select ?, id from security_permission where code in ('PERM_CLAIM_READ', 'PERM_CLAIM_REVIEW')", roleId);
+			userId = jdbcTemplate.queryForObject("insert into auth_user(email, username, password_hash, email_verified) "
+					+ "select ?, ?, password_hash, true from auth_user where email = 'user@local.dev' returning id",
+					Long.class, email, suffix);
+			jdbcTemplate.update("insert into security_user_role(user_id, role_id) values (?, ?)", userId, roleId);
+			AuthTokenResponse reviewer = loginAndRead(email, "DevUser123!");
+			assertThat(reviewer.user().roles()).doesNotContain("ROLE_MANAGER", "ROLE_ADMIN");
+			String token = reviewer.accessToken();
+			mockMvc.perform(get("/api/v1/claims/" + id).header(HttpHeaders.AUTHORIZATION, bearer(token)))
+					.andExpect(status().isOk());
+			changeStatus(token, id, ClaimStatus.UNDER_REVIEW, extractLong(registered, "version"))
+					.andExpect(status().isOk());
+			MvcResult reviewers = mockMvc.perform(get("/api/v1/claims/reviewers").header(HttpHeaders.AUTHORIZATION, bearer(token)))
+					.andExpect(status().isOk()).andReturn();
+			List<Long> reviewerIds = new ArrayList<>();
+			for (var entry : objectMapper.readTree(reviewers.getResponse().getContentAsString())) {
+				reviewerIds.add(entry.get("id").asLong());
+			}
+			assertThat(reviewerIds).contains(userId);
+		} finally {
+			jdbcTemplate.update("delete from claims where id = ?", id);
+			if (userId != null) {
+				jdbcTemplate.update("delete from auth_user where id = ?", userId);
+			}
+			jdbcTemplate.update("delete from security_role where id = ?", roleId);
+		}
 	}
 
 	@Test

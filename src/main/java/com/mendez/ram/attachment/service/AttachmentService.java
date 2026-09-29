@@ -128,7 +128,7 @@ public class AttachmentService {
 
 	@Transactional(readOnly = true)
 	public AttachmentDownload downloadClaimAttachment(Long claimId, UUID attachmentId, AuthenticatedUser principal) {
-		claimService.findViewableClaim(claimId, principal);
+		claimService.findEditableClaim(claimId, principal);
 		ClaimAttachment attachment = findAttachmentByClaimAndId(claimId, attachmentId);
 		StoredAttachmentResource storedResource = attachmentStorage.load(attachment.getStorageKey());
 		LOGGER.info("Attachment {} downloaded from claim {} by user {}", attachmentId, claimId, principal.id());

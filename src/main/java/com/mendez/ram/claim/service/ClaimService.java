@@ -194,7 +194,6 @@ public class ClaimService {
 
 		AuthUser actingUser = findAuthenticatedUser(principal);
 		AuthUser assignee = findEligibleAssignee(request.assignedToId());
-		Long previousAssigneeId = currentClaimAssigneeId(claim);
 
 		if (!Objects.equals(claim.getVersion(), request.version())) {
 			throw new ApiException(
@@ -206,6 +205,7 @@ public class ClaimService {
 
 		Claim assignedClaim = claimAssignmentService.assignClaim(
 				id, request.version(), assignee.getId(), actingUser.getId());
+		Long previousAssigneeId = currentClaimAssigneeId(assignedClaim);
 		recordClaimAssignmentHistory(assignedClaim, actingUser, previousAssigneeId, assignee);
 
 		LOGGER.info(
@@ -232,7 +232,7 @@ public class ClaimService {
 	public List<ClaimCommentResponse> loadClaimComments(Long id, AuthenticatedUser principal) {
 		findViewableClaim(id, principal);
 
-		return claimCommentRepository.findByClaimIdOrderByCreatedAtAscIdAsc(id)
+		return claimCommentRepository.findByClaimIdOrderByCreatedAtDescIdDesc(id)
 				.stream()
 				.map(this::toClaimCommentResponse)
 				.toList();

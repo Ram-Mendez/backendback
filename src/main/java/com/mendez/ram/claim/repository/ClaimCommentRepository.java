@@ -9,5 +9,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface ClaimCommentRepository extends JpaRepository<ClaimComment, Long> {
 
 	@EntityGraph(attributePaths = "author")
-	List<ClaimComment> findByClaimIdOrderByCreatedAtAscIdAsc(Long claimId);
+	List<ClaimComment> findByClaimIdOrderByCreatedAtDescIdDesc(Long claimId);
 }

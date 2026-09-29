@@ -14,6 +14,10 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -160,6 +164,54 @@ class AuthControllerIntegrationTest {
 		login("unverified@local.dev", "DevVerify123!")
 				.andExpect(status().isForbidden())
 				.andExpect(jsonPath("$.code").value("EMAIL_NOT_VERIFIED"));
+	}
+
+	@Test
+	void concurrentRefreshConsumesTokenOnceAndWinnerCanKeepRotating() throws Exception {
+		AuthTokenResponse initial = loginAndRead("manager@local.dev", "DevManager123!");
+		CountDownLatch ready = new CountDownLatch(2);
+		CountDownLatch start = new CountDownLatch(1);
+		List<MvcResult> results;
+		try (var executor = Executors.newFixedThreadPool(2)) {
+			var first = executor.submit(() -> concurrentRefresh(initial.refreshToken(), ready, start));
+			var second = executor.submit(() -> concurrentRefresh(initial.refreshToken(), ready, start));
+			try {
+				assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+			} finally {
+				start.countDown();
+			}
+			results = List.of(first.get(20, TimeUnit.SECONDS), second.get(20, TimeUnit.SECONDS));
+		}
+		assertThat(results).extracting(result -> result.getResponse().getStatus()).containsExactlyInAnyOrder(200, 401);
+		MvcResult winner = results.stream().filter(result -> result.getResponse().getStatus() == 200).findFirst().orElseThrow();
+		MvcResult loser = results.stream().filter(result -> result.getResponse().getStatus() == 401).findFirst().orElseThrow();
+		assertThat(objectMapper.readTree(loser.getResponse().getContentAsString()).get("code").asText())
+				.isEqualTo("INVALID_REFRESH_TOKEN");
+		AuthTokenResponse pair = objectMapper.readValue(winner.getResponse().getContentAsString(), AuthTokenResponse.class);
+		var consumedTokens = new ArrayList<String>();
+		consumedTokens.add(initial.refreshToken());
+		for (int rotation = 0; rotation < 3; rotation++) {
+			assertProtectedAccess(pair);
+			consumedTokens.add(pair.refreshToken());
+			MvcResult next = mockMvc.perform(post("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+					.content(objectMapper.writeValueAsString(new RefreshTokenRequest(pair.refreshToken()))))
+					.andExpect(status().isOk()).andReturn();
+			pair = objectMapper.readValue(next.getResponse().getContentAsString(), AuthTokenResponse.class);
+			assertThat(consumedTokens).doesNotContain(pair.refreshToken());
+		}
+		assertProtectedAccess(pair);
+		for (String consumed : consumedTokens) {
+			mockMvc.perform(post("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+					.content(objectMapper.writeValueAsString(new RefreshTokenRequest(consumed))))
+					.andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"));
+		}
+	}
+
+	private MvcResult concurrentRefresh(String refreshToken, CountDownLatch ready, CountDownLatch start) throws Exception {
+		ready.countDown();
+		assertThat(start.await(10, TimeUnit.SECONDS)).isTrue();
+		return mockMvc.perform(post("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(new RefreshTokenRequest(refreshToken)))).andReturn();
 	}
 
 	@Test

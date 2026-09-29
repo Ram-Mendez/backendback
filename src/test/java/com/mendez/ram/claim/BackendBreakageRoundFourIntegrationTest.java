@@ -1,7 +1,6 @@
 package com.mendez.ram.claim;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.contains;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -37,9 +36,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Characterizes the five deliberately broken endpoint behaviors, using committed
+ * Regressions for the five repaired round-four behaviors, using committed
  * HTTP transactions and PostgreSQL. No repository writes or mocked services.
- * After repairs, run with -Dround4.expectDefects=false to assert the healthy contract.
  */
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest
@@ -48,8 +46,6 @@ import tools.jackson.databind.ObjectMapper;
 @Testcontainers
 class BackendBreakageRoundFourIntegrationTest {
 
-	private static final boolean EXPECT_DEFECTS = Boolean.parseBoolean(
-			System.getProperty("round4.expectDefects", "true"));
 	private static final String CLAIMS = "/api/v1/claims";
 
 	@Autowired
@@ -59,7 +55,7 @@ class BackendBreakageRoundFourIntegrationTest {
 	private ObjectMapper objectMapper;
 
 	@Test
-	void bug1ClearingDeadlineRetainsThePreviousValue() throws Exception {
+	void clearingDeadlinePersistsNull() throws Exception {
 		AuthTokenResponse owner = loginUser();
 		Instant deadline = Instant.parse("2030-01-15T12:00:00Z");
 		ClaimResponse claim = create(owner, "Round4 deadline", ClaimPriority.HIGH, deadline);
@@ -70,22 +66,21 @@ class BackendBreakageRoundFourIntegrationTest {
 		MvcResult updated = perform(put(CLAIMS + "/" + claim.id()), owner, update)
 				.andExpect(status().isOk())
 				.andReturn();
-		Instant expectedDeadline = EXPECT_DEFECTS ? deadline : null;
-		assertThat(readClaim(updated).dueAt()).isEqualTo(expectedDeadline);
+		assertThat(readClaim(updated).dueAt()).isNull();
 		ClaimResponse reloaded = readClaim(perform(get(CLAIMS + "/" + claim.id()), owner)
 				.andExpect(status().isOk()).andReturn());
-		assertThat(reloaded.dueAt()).isEqualTo(expectedDeadline);
+		assertThat(reloaded.dueAt()).isNull();
 		assertThat(reloaded.title()).isEqualTo(update.title());
 		assertThat(reloaded.priority()).isEqualTo(ClaimPriority.HIGH);
 	}
 
 	@Test
-	void bug2CombinedStatusAndPriorityFiltersReturnPartialMatches() throws Exception {
+	void combinedStatusAndPriorityFiltersRequireBothToMatch() throws Exception {
 		AuthTokenResponse owner = loginUser();
 		String marker = "Round4-filter-" + UUID.randomUUID();
 		ClaimResponse draftHigh = create(owner, marker + " A", ClaimPriority.HIGH, null);
-		ClaimResponse draftLow = create(owner, marker + " B", ClaimPriority.LOW, null);
-		ClaimResponse registeredHigh = register(owner, create(owner, marker + " C", ClaimPriority.HIGH, null));
+		create(owner, marker + " B", ClaimPriority.LOW, null);
+		register(owner, create(owner, marker + " C", ClaimPriority.HIGH, null));
 		register(owner, create(owner, marker + " D", ClaimPriority.LOW, null));
 
 		perform(get(CLAIMS).param("search", marker).param("status", "DRAFT"), owner)
@@ -95,38 +90,28 @@ class BackendBreakageRoundFourIntegrationTest {
 		ResultActions combined = perform(get(CLAIMS)
 				.param("search", marker).param("status", "DRAFT").param("priority", "HIGH")
 				.param("sort", "title,asc"), owner).andExpect(status().isOk());
-		if (EXPECT_DEFECTS) {
-			combined.andExpect(jsonPath("$.totalElements").value(3))
-					.andExpect(jsonPath("$.content[*].id", contains(
-							draftHigh.id().intValue(), draftLow.id().intValue(), registeredHigh.id().intValue())));
-		} else {
-			combined.andExpect(jsonPath("$.totalElements").value(1))
-					.andExpect(jsonPath("$.content[0].id").value(draftHigh.id()));
-		}
+		combined.andExpect(jsonPath("$.totalElements").value(1))
+				.andExpect(jsonPath("$.content.length()").value(1))
+				.andExpect(jsonPath("$.content[0].id").value(draftHigh.id()));
 	}
 
 	@Test
-	void bug3WhitespaceCommentIsStoredAsAnEmptyComment() throws Exception {
+	void whitespaceCommentIsRejectedWithoutPersistingIt() throws Exception {
 		AuthTokenResponse owner = loginUser();
 		ClaimResponse claim = create(owner, "Round4 blank comment", ClaimPriority.NORMAL, null);
 		String comments = CLAIMS + "/" + claim.id() + "/comments";
 		perform(post(comments), owner, new CommentBody("Valid note"))
 				.andExpect(status().isCreated()).andExpect(jsonPath("$.body").value("Valid note"));
 		ResultActions blank = perform(post(comments), owner, new CommentBody("   "));
-		if (EXPECT_DEFECTS) {
-			blank.andExpect(status().isCreated()).andExpect(jsonPath("$.body").value(""));
-			perform(get(comments), owner).andExpect(status().isOk())
-					.andExpect(jsonPath("$.length()").value(2))
-					.andExpect(jsonPath("$[1].body").value(""));
-		} else {
-			blank.andExpect(status().isBadRequest());
-			perform(get(comments), owner).andExpect(status().isOk())
-					.andExpect(jsonPath("$.length()").value(1));
-		}
+		blank.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.code").value("COMMENT_BODY_REQUIRED"));
+		perform(get(comments), owner).andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(1))
+				.andExpect(jsonPath("$[0].body").value("Valid note"));
 	}
 
 	@Test
-	void bug4AnotherUsersClaimHistoryIsReadable() throws Exception {
+	void anotherUsersClaimHistoryIsHidden() throws Exception {
 		AuthTokenResponse manager = loginManager();
 		AuthTokenResponse outsider = loginUser();
 		ClaimResponse claim = register(manager,
@@ -138,33 +123,25 @@ class BackendBreakageRoundFourIntegrationTest {
 		perform(get(path + "/history"), manager).andExpect(status().isOk())
 				.andExpect(jsonPath("$.length()").value(2));
 		ResultActions history = perform(get(path + "/history"), outsider);
-		if (EXPECT_DEFECTS) {
-			history.andExpect(status().isOk())
-					.andExpect(jsonPath("$[0].eventType").value("CREATED"))
-					.andExpect(jsonPath("$[1].eventType").value("STATUS_CHANGED"))
-					.andExpect(jsonPath("$[1].eventData").value("DRAFT -> REGISTERED"));
-		} else {
-			history.andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("CLAIM_NOT_FOUND"));
-		}
+		history.andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("CLAIM_NOT_FOUND"));
 	}
 
 	@Test
-	void bug5ReviewersCommentIsAttributedToTheClaimOwner() throws Exception {
+	void reviewersCommentIsAttributedToTheReviewer() throws Exception {
 		AuthTokenResponse owner = loginUser();
 		AuthTokenResponse manager = loginManager();
 		ClaimResponse claim = create(owner, "Round4 comment author", ClaimPriority.NORMAL, null);
 		String comments = CLAIMS + "/" + claim.id() + "/comments";
 		assertThat(manager.user().id()).isNotEqualTo(owner.user().id());
-		AuthTokenResponse reportedAuthor = EXPECT_DEFECTS ? owner : manager;
 		perform(post(comments), manager, new CommentBody("Reviewed by manager"))
 				.andExpect(status().isCreated())
-				.andExpect(jsonPath("$.authorId").value(reportedAuthor.user().id()))
-				.andExpect(jsonPath("$.authorUsername").value(reportedAuthor.user().username()));
+				.andExpect(jsonPath("$.authorId").value(manager.user().id()))
+				.andExpect(jsonPath("$.authorUsername").value(manager.user().username()));
 		perform(get(comments), owner).andExpect(status().isOk())
 				.andExpect(jsonPath("$.length()").value(1))
 				.andExpect(jsonPath("$[0].body").value("Reviewed by manager"))
-				.andExpect(jsonPath("$[0].authorId").value(reportedAuthor.user().id()))
-				.andExpect(jsonPath("$[0].authorUsername").value(reportedAuthor.user().username()));
+				.andExpect(jsonPath("$[0].authorId").value(manager.user().id()))
+				.andExpect(jsonPath("$[0].authorUsername").value(manager.user().username()));
 	}
 
 	private AuthTokenResponse loginUser() throws Exception {

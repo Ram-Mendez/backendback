@@ -377,6 +377,56 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	@Test
+	void rejectedDeleteCommitPreservesMetadataHistoryAndDownload() throws Exception {
+		String token = accessToken("user@local.dev", "DevUser123!");
+		Long claimId = createClaim(token, "Attachment delete rollback");
+		MvcResult uploaded = mockMvc.perform(upload(token, claimId, textFile("files", "keep.txt", "Keep these bytes"))
+				.param("relativePaths", "keep.txt")).andExpect(status().isCreated()).andReturn();
+		UUID attachmentId = extractUuid(uploaded, 0);
+		String path = "/api/v1/claims/" + claimId + "/attachments/" + attachmentId;
+		mockMvc.perform(get(path + "/content").header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isOk()).andExpect(content().string("Keep these bytes"));
+		String historyBefore = mockMvc.perform(get("/api/v1/claims/" + claimId + "/history")
+				.header(HttpHeaders.AUTHORIZATION, bearer(token))).andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+
+		// Deferred PostgreSQL trigger rejects the commit, after DELETE and history writes have run.
+		jdbcTemplate.execute("""
+				create function test_reject_attachment_delete() returns trigger language plpgsql as $$
+				begin
+				    raise exception 'Simulated attachment delete commit failure';
+				end;
+				$$
+				""");
+		try {
+			jdbcTemplate.execute("create constraint trigger test_attachment_delete_commit_failure "
+					+ "after delete on claim_attachments deferrable initially deferred for each row "
+					+ "when (old.id = '" + attachmentId + "'::uuid) execute function test_reject_attachment_delete()");
+			try {
+				MvcResult failed = mockMvc.perform(delete(path).header(HttpHeaders.AUTHORIZATION, bearer(token)))
+						.andExpect(status().isInternalServerError())
+						.andExpect(jsonPath("$.code").value("INTERNAL_ERROR")).andReturn();
+				assertThat(failed.getResolvedException()).hasStackTraceContaining("Simulated attachment delete commit failure");
+			} finally {
+				jdbcTemplate.execute("drop trigger test_attachment_delete_commit_failure on claim_attachments");
+			}
+		} finally {
+			jdbcTemplate.execute("drop function test_reject_attachment_delete()");
+		}
+		mockMvc.perform(get("/api/v1/claims/" + claimId + "/attachments").header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+				.andExpect(jsonPath("$[0].id").value(attachmentId.toString()));
+		mockMvc.perform(get(path + "/content").header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isOk()).andExpect(content().string("Keep these bytes"));
+		mockMvc.perform(get("/api/v1/claims/" + claimId + "/history").header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isOk()).andExpect(content().json(historyBefore));
+		mockMvc.perform(delete(path).header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isNoContent());
+		mockMvc.perform(get(path + "/content").header(HttpHeaders.AUTHORIZATION, bearer(token)))
+				.andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("ATTACHMENT_NOT_FOUND"));
+	}
+
+	@Test
 	void userCannotAccessAnotherUsersClaimAttachments() throws Exception {
 		String managerToken = accessToken("manager@local.dev", "DevManager123!");
 		String userToken = accessToken("user@local.dev", "DevUser123!");
@@ -401,6 +451,16 @@ class AttachmentControllerIntegrationTest {
 						.header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
 				.andExpect(status().isNotFound())
 				.andExpect(jsonPath("$.code").value("CLAIM_NOT_FOUND"));
+
+		Long ownClaimId = createClaim(userToken, "Own claim with foreign attachment ID");
+		String mismatchedPath = "/api/v1/claims/" + ownClaimId + "/attachments/" + attachmentId;
+		mockMvc.perform(get(mismatchedPath + "/content").header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
+				.andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("ATTACHMENT_NOT_FOUND"));
+		mockMvc.perform(delete(mismatchedPath).header(HttpHeaders.AUTHORIZATION, bearer(userToken)))
+				.andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("ATTACHMENT_NOT_FOUND"));
+		mockMvc.perform(get("/api/v1/claims/" + claimId + "/attachments/" + attachmentId + "/content")
+				.header(HttpHeaders.AUTHORIZATION, bearer(managerToken)))
+				.andExpect(status().isOk()).andExpect(content().string("Privado"));
 	}
 
 	@Test
