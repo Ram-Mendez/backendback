@@ -27,7 +27,7 @@ public class ClaimHistory {
 	@JoinColumn(name = "claim_id")
 	private Claim claim;
 
-	@ManyToOne(fetch = FetchType.LAZY, optional = false)
+	@ManyToOne(fetch = FetchType.LAZY)
 	@JoinColumn(name = "actor_id")
 	private AuthUser actor;
 

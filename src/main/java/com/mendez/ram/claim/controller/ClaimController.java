@@ -17,6 +17,7 @@ import com.mendez.ram.claim.dto.CreateClaimCommentRequest;
 import com.mendez.ram.claim.dto.CreateClaimRequest;
 import com.mendez.ram.claim.dto.PageResponse;
 import com.mendez.ram.claim.dto.ReviewerResponse;
+import com.mendez.ram.claim.dto.RouteClaimTeamRequest;
 import com.mendez.ram.claim.dto.UpdateClaimRequest;
 import com.mendez.ram.claim.entity.ClaimPriority;
 import com.mendez.ram.claim.entity.ClaimStatus;
@@ -113,6 +114,14 @@ public class ClaimController {
 			@Valid @RequestBody AssignClaimRequest request,
 			@AuthenticationPrincipal AuthenticatedUser principal) {
 		return claimService.assignClaim(id, request, principal);
+	}
+
+	@PatchMapping("/{id}/team")
+	@PreAuthorize("hasAnyAuthority('PERM_CLAIM_REVIEW','PERM_CLAIM_ADMIN')")
+	@Operation(operationId = "routeToTeam")
+	public ClaimResponse routeClaimToTeam(@PathVariable Long id, @Valid @RequestBody RouteClaimTeamRequest request,
+			@AuthenticationPrincipal AuthenticatedUser principal) {
+		return claimService.routeClaimToTeam(id, request, principal);
 	}
 
 	@GetMapping("/{id}/history")

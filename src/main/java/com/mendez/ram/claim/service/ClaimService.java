@@ -16,6 +16,7 @@ import com.mendez.ram.claim.dto.CreateClaimCommentRequest;
 import com.mendez.ram.claim.dto.CreateClaimRequest;
 import com.mendez.ram.claim.dto.PageResponse;
 import com.mendez.ram.claim.dto.ReviewerResponse;
+import com.mendez.ram.claim.dto.RouteClaimTeamRequest;
 import com.mendez.ram.claim.dto.UpdateClaimRequest;
 import com.mendez.ram.claim.entity.Claim;
 import com.mendez.ram.claim.entity.ClaimComment;
@@ -34,6 +35,10 @@ import com.mendez.ram.security.entity.AuthUser;
 import com.mendez.ram.security.entity.SecurityPermission;
 import com.mendez.ram.security.entity.SecurityRole;
 import com.mendez.ram.security.repository.AuthUserRepository;
+import com.mendez.ram.claimant.entity.Claimant;
+import com.mendez.ram.claimant.service.ClaimantService;
+import com.mendez.ram.team.entity.Team;
+import com.mendez.ram.team.service.TeamService;
 import jakarta.persistence.EntityManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,6 +63,8 @@ public class ClaimService {
 	private final ClaimHistoryRepository claimHistoryRepository;
 	private final ClaimCommentRepository claimCommentRepository;
 	private final ClaimAssignmentService claimAssignmentService;
+	private final ClaimantService claimantService;
+	private final TeamService teamService;
 
 	@Autowired
 	public ClaimService(
@@ -68,7 +75,9 @@ public class ClaimService {
 			Clock clock,
 			ClaimHistoryRepository claimHistoryRepository,
 			ClaimCommentRepository claimCommentRepository,
-			ClaimAssignmentService claimAssignmentService) {
+			ClaimAssignmentService claimAssignmentService,
+			ClaimantService claimantService,
+			TeamService teamService) {
 		this.claimRepository = claimRepository;
 		this.authUserRepository = authUserRepository;
 		this.claimMapper = claimMapper;
@@ -77,6 +86,8 @@ public class ClaimService {
 		this.claimHistoryRepository = claimHistoryRepository;
 		this.claimCommentRepository = claimCommentRepository;
 		this.claimAssignmentService = claimAssignmentService;
+		this.claimantService = claimantService;
+		this.teamService = teamService;
 	}
 
 	public ClaimService(
@@ -93,7 +104,7 @@ public class ClaimService {
 				clock,
 				null,
 				null,
-				new ClaimAssignmentService(claimRepository, authUserRepository, entityManager, clock));
+				new ClaimAssignmentService(claimRepository, authUserRepository, entityManager, clock), null, null);
 	}
 
 	@Transactional(readOnly = true)
@@ -101,7 +112,11 @@ public class ClaimService {
 			AuthenticatedUser principal) {
 		ensureAuthenticated(principal);
 		Specification<Claim> specification = ClaimSpecifications.matchingClaimSearchCriteria(claimSearchCriteria);
-		if (!canReviewClaims(principal)) {
+		if (canAdministerClaims(principal)) {
+			// Administrators retain global visibility for queue administration.
+		} else if (canReviewClaims(principal)) {
+			specification = specification.and(ClaimSpecifications.visibleToReviewer(principal.id()));
+		} else {
 			specification = specification.and(ClaimSpecifications.createdById(principal.id()));
 		}
 		Page<ClaimSummaryResponse> claimSummaryPage = claimRepository.findAll(specification, pageable)
@@ -119,7 +134,10 @@ public class ClaimService {
 	@Transactional
 	public ClaimResponse createClaim(CreateClaimRequest request, AuthenticatedUser principal) {
 		AuthUser actingUser = findAuthenticatedUser(principal);
-		Claim claim = claimMapper.toClaimEntity(request, actingUser, Instant.now(clock));
+		Claimant claimant = claimantService == null ? null : claimantService.resolveClaimant(request.claimantId(), request.claimantName());
+		Claim claim = claimantService == null
+				? claimMapper.toClaimEntity(request, actingUser, Instant.now(clock))
+				: claimMapper.toClaimEntity(request, claimant, actingUser, Instant.now(clock));
 		Claim savedClaim = claimRepository.saveAndFlush(claim);
 		entityManager.refresh(savedClaim);
 		recordClaimHistory(
@@ -138,7 +156,10 @@ public class ClaimService {
 		ensureExpectedVersion(claim, request.version());
 		AuthUser actingUser = findAuthenticatedUser(principal);
 		ClaimPriority previousPriority = claim.getPriority();
-		claimMapper.updateClaimEntity(claim, request, actingUser, Instant.now(clock));
+		Claimant claimant = claimantService == null ? claim.getClaimant()
+				: claimantService.resolveClaimant(request.claimantId(), request.claimantName());
+		if (claimantService == null) claimMapper.updateClaimEntity(claim, request, actingUser, Instant.now(clock));
+		else claimMapper.updateClaimEntity(claim, request, claimant, actingUser, Instant.now(clock));
 		recordClaimHistory(claim, actingUser, ClaimHistoryEventType.EDITED, "details updated");
 		if (previousPriority != claim.getPriority()) {
 			recordClaimHistory(
@@ -194,6 +215,9 @@ public class ClaimService {
 
 		AuthUser actingUser = findAuthenticatedUser(principal);
 		AuthUser assignee = findEligibleAssignee(request.assignedToId());
+		if (claim.getTeam() != null && !claim.getTeam().containsUser(assignee.getId())) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "ASSIGNEE_NOT_IN_TEAM", "El responsable no pertenece al equipo de la reclamacion.");
+		}
 
 		if (!Objects.equals(claim.getVersion(), request.version())) {
 			throw new ApiException(
@@ -214,6 +238,30 @@ public class ClaimService {
 				actingUser.getId());
 
 		return claimMapper.toClaimResponse(assignedClaim);
+	}
+
+	@Transactional
+	public ClaimResponse routeClaimToTeam(Long id, RouteClaimTeamRequest request, AuthenticatedUser principal) {
+		Claim claim = findClaimEntityById(id);
+		ensureUserCanReviewClaims(principal);
+		ensureClaimIsAssignable(claim);
+		ensureExpectedVersion(claim, request.version());
+		AuthUser actingUser = findAuthenticatedUser(principal);
+		Team newTeam = teamService.findEnabledTeamWithMembers(request.teamId());
+		Long previousTeamId = claim.getTeam() == null ? null : claim.getTeam().getId();
+		Long previousAssigneeId = currentClaimAssigneeId(claim);
+		Instant now = Instant.now(clock);
+		claim.routeToTeam(newTeam, actingUser, now);
+		recordClaimHistory(claim, actingUser, ClaimHistoryEventType.TEAM_ROUTED,
+				"from=" + previousTeamId + ",to=" + newTeam.getId());
+		if (previousAssigneeId != null && !newTeam.containsUser(previousAssigneeId)) {
+			claim.clearAssignment(actingUser, now);
+			recordClaimHistory(claim, actingUser, ClaimHistoryEventType.ASSIGNED,
+					"from=" + previousAssigneeId + ",to=null,reason=team_change");
+		}
+		claimRepository.flush();
+		entityManager.refresh(claim);
+		return claimMapper.toClaimResponse(findClaimEntityById(id));
 	}
 
 	@Transactional(readOnly = true)
@@ -342,12 +390,13 @@ public class ClaimService {
 
 
 	private ClaimHistoryResponse toClaimHistoryResponse(ClaimHistory claimHistoryEntry) {
+		AuthUser actor = claimHistoryEntry.getActor();
 		return new ClaimHistoryResponse(
 				claimHistoryEntry.getId(),
 				claimHistoryEntry.getEventType(),
 				claimHistoryEntry.getEventData(),
-				claimHistoryEntry.getActor().getId(),
-				claimHistoryEntry.getActor().getUsername(),
+				actor == null ? null : actor.getId(),
+				actor == null ? "system" : actor.getUsername(),
 				claimHistoryEntry.getOccurredAt());
 	}
 
@@ -474,7 +523,9 @@ public class ClaimService {
 
 	private void ensureUserCanViewClaim(Claim claim, AuthenticatedUser principal) {
 		ensureAuthenticated(principal);
-		if (canReviewClaims(principal) || isClaimOwner(claim, principal)) {
+		if (canAdministerClaims(principal)
+				|| isClaimOwner(claim, principal)
+				|| canReviewTeamClaim(claim, principal)) {
 			return;
 		}
 
@@ -535,6 +586,18 @@ public class ClaimService {
 				|| principal.permissions().contains("PERM_CLAIM_ADMIN")
 				|| principal.roles().contains("ROLE_ADMIN")
 				|| principal.roles().contains("ROLE_MANAGER");
+	}
+
+	private static boolean canAdministerClaims(AuthenticatedUser principal) {
+		return principal.permissions().contains("PERM_CLAIM_ADMIN")
+				|| principal.roles().contains("ROLE_ADMIN");
+	}
+
+	private static boolean canReviewTeamClaim(Claim claim, AuthenticatedUser principal) {
+		if (!canReviewClaims(principal)) {
+			return false;
+		}
+		return claim.getTeam() == null || claim.getTeam().containsUser(principal.id());
 	}
 
 	private static boolean isClaimOwner(Claim claim, AuthenticatedUser principal) {

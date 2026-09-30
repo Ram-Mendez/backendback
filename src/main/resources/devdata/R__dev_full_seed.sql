@@ -593,3 +593,20 @@ WHERE NOT EXISTS (
     FROM claims c
     WHERE LOWER(c.invoice_number) = LOWER(v.invoice_number)
 );
+
+-- Keep legacy seeded claimant text linked to the normalized claimant domain.
+INSERT INTO claimants(name, normalized_name)
+SELECT min(trim(claimant)), lower(trim(claimant))
+FROM claims
+WHERE claimant IS NOT NULL AND trim(claimant) <> ''
+GROUP BY lower(trim(claimant))
+ON CONFLICT DO NOTHING;
+
+UPDATE claims claim
+SET claimant_id = claimant.id
+FROM claimants claimant
+WHERE claim.claimant_id IS NULL
+  AND claim.claimant IS NOT NULL
+  AND claimant.normalized_name = lower(trim(claim.claimant))
+  AND claimant.normalized_email IS NULL
+  AND claimant.organization_id IS NULL;

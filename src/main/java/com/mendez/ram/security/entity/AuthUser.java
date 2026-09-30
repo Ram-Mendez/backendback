@@ -4,6 +4,8 @@ import java.time.OffsetDateTime;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
+import com.mendez.ram.team.entity.Team;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -69,6 +71,9 @@ public class AuthUser {
 			inverseJoinColumns = @JoinColumn(name = "role_id"))
 	private Set<SecurityRole> roles = new LinkedHashSet<>();
 
+	@ManyToMany(mappedBy = "members", fetch = FetchType.LAZY)
+	private Set<Team> teams = new LinkedHashSet<>();
+
 	protected AuthUser() {
 	}
 
@@ -114,6 +119,10 @@ public class AuthUser {
 
 	public Set<SecurityRole> getRoles() {
 		return roles;
+	}
+
+	public Set<Team> getTeams() {
+		return teams;
 	}
 
 	public void markSuccessfulLogin(OffsetDateTime at) {

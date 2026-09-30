@@ -13,9 +13,16 @@ public record UpdateClaimRequest(
 		@NotBlank @Size(max = 200) String title,
 		@NotBlank @Size(max = 4000) String description,
 		@Size(max = 160) String claimantName,
+		Long claimantId,
 		ClaimPriority priority,
 		Instant dueAt,
+		Instant slaDeadline,
 		@NotNull @PositiveOrZero Long version) {
+
+	public UpdateClaimRequest(String title, String description, String claimantName, ClaimPriority priority,
+			Instant dueAt, Long version) {
+		this(title, description, claimantName, null, priority, dueAt, null, version);
+	}
 
 	public UpdateClaimRequest(
 			String title,
@@ -26,8 +33,6 @@ public record UpdateClaimRequest(
 				title,
 				description,
 				claimantName,
-				ClaimPriority.NORMAL,
-				null,
-				version);
+				null, ClaimPriority.NORMAL, null, null, version);
 	}
 }

@@ -12,6 +12,12 @@ public record ClaimSummaryResponse(
 		ClaimStatus status,
 		ClaimPriority priority,
 		Instant dueAt,
+		String claimantName,
+		String organizationName,
+		Long teamId,
+		String teamName,
+		Instant slaDeadline,
+		Instant slaBreachedAt,
 		Long assignedToId,
 		String assignedToUsername,
 		Long createdById,
@@ -19,6 +25,6 @@ public record ClaimSummaryResponse(
 		Instant createdAt,
 		Instant updatedAt) {
 	public ClaimSummaryResponse(Long id, String reference, String title, ClaimStatus status, Long createdById, String createdByUsername, Instant createdAt, Instant updatedAt) {
-		this(id,reference,title,status,ClaimPriority.NORMAL,null,null,null,createdById,createdByUsername,createdAt,updatedAt);
+		this(id,reference,title,status,ClaimPriority.NORMAL,null,null,null,null,null,null,null,null,null,createdById,createdByUsername,createdAt,updatedAt);
 	}
 }

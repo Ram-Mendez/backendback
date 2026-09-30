@@ -3,6 +3,8 @@ package com.mendez.ram.claim.entity;
 import java.time.Instant;
 
 import com.mendez.ram.security.entity.AuthUser;
+import com.mendez.ram.claimant.entity.Claimant;
+import com.mendez.ram.team.entity.Team;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -51,8 +53,19 @@ public class Claim {
 	@Column(name = "assigned_at")
 	private Instant assignedAt;
 
-	@Column(name = "claimant", length = 160)
-	private String claimantName;
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "claimant_id")
+	private Claimant claimant;
+
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "team_id")
+	private Team team;
+
+	@Column(name = "sla_deadline")
+	private Instant slaDeadline;
+
+	@Column(name = "sla_breached_at")
+	private Instant slaBreachedAt;
 
 	@ManyToOne(fetch = FetchType.LAZY, optional = false)
 	@JoinColumn(name = "created_by", nullable = false)
@@ -78,36 +91,28 @@ public class Claim {
 	public Claim(
 			String title,
 			String description,
-			String claimantName,
+			Claimant claimant,
 			ClaimPriority priority,
 			Instant dueAt,
+			Instant slaDeadline,
 			AuthUser createdBy,
 			Instant creationTime) {
 		this.title = title;
 		this.description = description;
-		this.claimantName = claimantName;
+		this.claimant = claimant;
 		this.status = ClaimStatus.DRAFT;
 		this.priority = priority;
 		this.dueAt = dueAt;
+		this.slaDeadline = slaDeadline;
 		this.createdBy = createdBy;
 		this.createdAt = creationTime;
 		this.updatedAt = creationTime;
 	}
 
-	public Claim(
-			String title,
-			String description,
-			String claimantName,
-			AuthUser createdBy,
-			Instant creationTime) {
-		this(
-				title,
-				description,
-				claimantName,
-				ClaimPriority.NORMAL,
-				null,
-				createdBy,
-				creationTime);
+	public Claim(String title, String description, String claimantName, AuthUser createdBy, Instant creationTime) {
+		this(title, description,
+				claimantName == null ? null : new Claimant(claimantName, claimantName.toLowerCase(), null, null, null),
+				ClaimPriority.NORMAL, null, null, createdBy, creationTime);
 	}
 
 	public Long getId() {
@@ -146,9 +151,11 @@ public class Claim {
 		return assignedAt;
 	}
 
-	public String getClaimantName() {
-		return claimantName;
-	}
+	public Claimant getClaimant() { return claimant; }
+	public String getClaimantName() { return claimant == null ? null : claimant.getName(); }
+	public Team getTeam() { return team; }
+	public Instant getSlaDeadline() { return slaDeadline; }
+	public Instant getSlaBreachedAt() { return slaBreachedAt; }
 
 	public AuthUser getCreatedBy() {
 		return createdBy;
@@ -173,16 +180,18 @@ public class Claim {
 	public void updateDetails(
 			String title,
 			String description,
-			String claimantName,
+			Claimant claimant,
 			ClaimPriority priority,
 			Instant dueAt,
+			Instant slaDeadline,
 			AuthUser updatedBy,
 			Instant updateTime) {
 		this.title = title;
 		this.description = description;
-		this.claimantName = claimantName;
+		this.claimant = claimant;
 		this.priority = priority;
 		this.dueAt = dueAt;
+		this.slaDeadline = slaDeadline;
 		this.updatedBy = updatedBy;
 		this.updatedAt = updateTime;
 	}
@@ -192,6 +201,28 @@ public class Claim {
 		this.assignedAt = assignmentTime;
 		this.updatedBy = updatedBy;
 		this.updatedAt = assignmentTime;
+	}
+
+	public void routeToTeam(Team newTeam, AuthUser updatedBy, Instant updateTime) {
+		this.team = newTeam;
+		this.updatedBy = updatedBy;
+		this.updatedAt = updateTime;
+	}
+
+	public void clearAssignment(AuthUser updatedBy, Instant updateTime) {
+		this.assignedTo = null;
+		this.assignedAt = null;
+		this.updatedBy = updatedBy;
+		this.updatedAt = updateTime;
+	}
+
+	public boolean breachSla(Instant breachTime) {
+		if (slaBreachedAt != null || slaDeadline == null || status.isFinal() || slaDeadline.isAfter(breachTime)) {
+			return false;
+		}
+		this.slaBreachedAt = breachTime;
+		this.updatedAt = breachTime;
+		return true;
 	}
 
 	public void changeStatus(ClaimStatus newStatus, AuthUser updatedBy, Instant statusChangeTime) {

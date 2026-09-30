@@ -135,6 +135,17 @@ public final class ClaimSpecifications {
 		return (root, query, builder) -> builder.equal(root.get("createdBy").get("id"), userId);
 	}
 
+	public static Specification<Claim> visibleToReviewer(Long userId) {
+		return (root, query, builder) -> {
+			var team = root.join("team", JoinType.LEFT);
+			var teamMember = team.join("members", JoinType.LEFT);
+			return builder.or(
+					builder.isNull(root.get("team")),
+					builder.equal(teamMember.get("id"), userId),
+					builder.equal(root.get("createdBy").get("id"), userId));
+		};
+	}
+
 	private static Specification<Claim> fieldContainsIgnoreCase(String fieldName, String searchText) {
 		return (root, query, builder) -> {
 			if (!StringUtils.hasText(searchText)) {
@@ -146,18 +157,22 @@ public final class ClaimSpecifications {
 	}
 
 	private static Specification<Claim> searchTermMatches(String searchTerm) {
-		return (root, query,builder) -> {
+		return (root, query, builder) -> {
 			if (!StringUtils.hasText(searchTerm)) {
 				return builder.conjunction();
 			}
 
 			String containsPattern = containsPattern(searchTerm);
 			var createdByUser = root.join("createdBy", JoinType.LEFT);
+			var claimant = root.join("claimant", JoinType.LEFT);
+			var organization = claimant.join("organization", JoinType.LEFT);
 			return builder.or(
 					builder.like(builder.lower(root.get("reference")), containsPattern, '\\'),
 					builder.like(builder.lower(root.get("title")), containsPattern, '\\'),
 					builder.like(builder.lower(root.get("description")), containsPattern, '\\'),
-					builder.like(builder.lower(root.get("claimantName")), containsPattern, '\\'),
+					builder.like(builder.lower(claimant.get("name")), containsPattern, '\\'),
+					builder.like(builder.lower(claimant.get("email")), containsPattern, '\\'),
+					builder.like(builder.lower(organization.get("name")), containsPattern, '\\'),
 					builder.like(builder.lower(createdByUser.get("username")), containsPattern, '\\'),
 					builder.like(builder.lower(createdByUser.get("email")), containsPattern, '\\')
 			);
