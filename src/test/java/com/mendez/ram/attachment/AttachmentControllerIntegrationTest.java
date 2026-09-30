@@ -464,7 +464,7 @@ class AttachmentControllerIntegrationTest {
 	}
 
 	@Test
-	void finalClaimDoesNotAllowUploadOrDelete() throws Exception {
+	void finalClaimAllowsDownloadButDoesNotAllowUploadOrDelete() throws Exception {
 		String managerToken = accessToken("manager@local.dev", "DevManager123!");
 		MvcResult created = createClaimResult(managerToken, "Attachments final claim");
 		Long claimId = extractLong(created, "id");
@@ -477,6 +477,11 @@ class AttachmentControllerIntegrationTest {
 		version = changeStatus(managerToken, claimId, ClaimStatus.REGISTERED, version);
 		version = changeStatus(managerToken, claimId, ClaimStatus.UNDER_REVIEW, version);
 		changeStatus(managerToken, claimId, ClaimStatus.ACCEPTED, version);
+
+		mockMvc.perform(get("/api/v1/claims/" + claimId + "/attachments/" + attachmentId + "/content")
+					.header(HttpHeaders.AUTHORIZATION, bearer(managerToken)))
+				.andExpect(status().isOk())
+				.andExpect(content().string("Final"));
 
 		mockMvc.perform(upload(managerToken, claimId, textFile("files", "blocked.txt", "Blocked"))
 				.param("relativePaths", "blocked.txt"))

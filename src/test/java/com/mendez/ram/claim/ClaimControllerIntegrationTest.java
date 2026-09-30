@@ -252,6 +252,153 @@ class ClaimControllerIntegrationTest {
 	}
 
 	@Test
+	void searchIncludesClaimantName() throws Exception {
+		String adminToken = accessToken("admin@local.dev", "DevAdmin123!");
+		String claimantName = "Claimant-" + UUID.randomUUID();
+		MvcResult created = mockMvc.perform(post("/api/v1/claims")
+				.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(new CreateClaimRequest(
+						"Search by claimant",
+						"The unique search value is only present in the claimant name.",
+						claimantName))))
+				.andExpect(status().isCreated())
+				.andReturn();
+		Long claimId = extractClaimId(created);
+
+		mockMvc.perform(get("/api/v1/claims")
+					.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+					.param("search", claimantName))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.totalElements").value(1))
+				.andExpect(jsonPath("$.content.length()").value(1))
+				.andExpect(jsonPath("$.content[0].id").value(claimId));
+	}
+
+	@Test
+	void searchTreatsPercentAndUnderscoreAsLiteralCharacters() throws Exception {
+		String adminToken = accessToken("admin@local.dev", "DevAdmin123!");
+		String suffix = UUID.randomUUID().toString().replace("-", "");
+		String literalUnderscore = "Round5_literal_" + suffix;
+		String underscoreDecoy = "Round5XliteralY" + suffix;
+		String literalPercent = "Round5%literal%" + suffix;
+		String percentDecoy = "Round5-anyliteral-value" + suffix;
+
+		Long underscoreClaimId = extractClaimId(createClaim(adminToken, literalUnderscore)
+				.andExpect(status().isCreated()).andReturn());
+		createClaim(adminToken, underscoreDecoy).andExpect(status().isCreated());
+		Long percentClaimId = extractClaimId(createClaim(adminToken, literalPercent)
+				.andExpect(status().isCreated()).andReturn());
+		createClaim(adminToken, percentDecoy).andExpect(status().isCreated());
+
+		mockMvc.perform(get("/api/v1/claims")
+					.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+					.param("search", literalUnderscore))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.totalElements").value(1))
+				.andExpect(jsonPath("$.content[0].id").value(underscoreClaimId));
+		mockMvc.perform(get("/api/v1/claims")
+					.header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+					.param("search", literalPercent))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.totalElements").value(1))
+				.andExpect(jsonPath("$.content[0].id").value(percentClaimId));
+	}
+
+	@Test
+	void registeringClaimPreservesExistingReviewerAssignment() throws Exception {
+		String managerToken = accessToken("manager@local.dev", "DevManager123!");
+		MvcResult created = createClaim(managerToken, "Registered assignment")
+				.andExpect(status().isCreated()).andReturn();
+		Long claimId = extractClaimId(created);
+		ReviewerTestData reviewer = firstEligibleReviewer(managerToken);
+		MvcResult assigned = assignClaim(managerToken, claimId, reviewer.id(), extractLong(created, "version"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.assignedToId").value(reviewer.id()))
+				.andReturn();
+
+		changeStatus(managerToken, claimId, ClaimStatus.REGISTERED, extractLong(assigned, "version"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.assignedToId").value(reviewer.id()))
+				.andExpect(jsonPath("$.assignedToUsername").value(reviewer.username()));
+	}
+
+	@Test
+	void reviewersEndpointOnlyReturnsUsersWithReviewCapability() throws Exception {
+		String managerToken = accessToken("manager@local.dev", "DevManager123!");
+		MvcResult reviewers = mockMvc.perform(get("/api/v1/claims/reviewers")
+					.header(HttpHeaders.AUTHORIZATION, bearer(managerToken)))
+				.andExpect(status().isOk())
+				.andReturn();
+		List<String> usernames = new ArrayList<>();
+		for (var reviewer : objectMapper.readTree(reviewers.getResponse().getContentAsString())) {
+			usernames.add(reviewer.get("username").asText());
+		}
+
+		assertThat(usernames)
+				.contains("dev-admin", "dev-manager")
+				.doesNotContain("dev-user", "dev-locked", "dev-disabled", "dev-unverified");
+	}
+
+	@Test
+	void reassignmentHistoryPreservesOldAndNewAssigneeIds() throws Exception {
+		String managerToken = accessToken("manager@local.dev", "DevManager123!");
+		MvcResult created = createClaim(managerToken, "Reassignment history")
+				.andExpect(status().isCreated()).andReturn();
+		Long claimId = extractClaimId(created);
+		Long adminId = jdbcTemplate.queryForObject(
+				"select id from auth_user where email = 'admin@local.dev'", Long.class);
+		Long managerId = jdbcTemplate.queryForObject(
+				"select id from auth_user where email = 'manager@local.dev'", Long.class);
+		MvcResult firstAssignment = assignClaim(managerToken, claimId, adminId, extractLong(created, "version"))
+				.andExpect(status().isOk()).andReturn();
+		assignClaim(managerToken, claimId, managerId, extractLong(firstAssignment, "version"))
+				.andExpect(status().isOk());
+
+		MvcResult history = mockMvc.perform(get("/api/v1/claims/" + claimId + "/history")
+					.header(HttpHeaders.AUTHORIZATION, bearer(managerToken)))
+				.andExpect(status().isOk())
+				.andReturn();
+		List<String> assignmentHistory = new ArrayList<>();
+		for (var entry : objectMapper.readTree(history.getResponse().getContentAsString())) {
+			if (entry.get("eventType").asText().equals("ASSIGNED")) {
+				assignmentHistory.add(entry.get("eventData").asText());
+			}
+		}
+		assertThat(assignmentHistory).containsExactly(
+				"from=null,to=" + adminId,
+				"from=" + adminId + ",to=" + managerId);
+	}
+
+	@Test
+	void commentsAreReturnedFromOldestToNewest() throws Exception {
+		String managerToken = accessToken("manager@local.dev", "DevManager123!");
+		Long claimId = extractClaimId(createClaim(managerToken, "Chronological comments")
+				.andExpect(status().isCreated()).andReturn());
+		String commentsPath = "/api/v1/claims/" + claimId + "/comments";
+		MvcResult olderComment = mockMvc.perform(post(commentsPath)
+					.header(HttpHeaders.AUTHORIZATION, bearer(managerToken))
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"body\":\"Oldest comment\"}"))
+				.andExpect(status().isCreated()).andReturn();
+		MvcResult newerComment = mockMvc.perform(post(commentsPath)
+					.header(HttpHeaders.AUTHORIZATION, bearer(managerToken))
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"body\":\"Newest comment\"}"))
+				.andExpect(status().isCreated()).andReturn();
+		jdbcTemplate.update("update claim_comments set created_at = cast(? as timestamptz) where id = ?",
+				"2026-01-01T10:00:00Z", extractLong(olderComment, "id"));
+		jdbcTemplate.update("update claim_comments set created_at = cast(? as timestamptz) where id = ?",
+				"2026-01-01T11:00:00Z", extractLong(newerComment, "id"));
+
+		mockMvc.perform(get(commentsPath).header(HttpHeaders.AUTHORIZATION, bearer(managerToken)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(2))
+				.andExpect(jsonPath("$[0].body").value("Oldest comment"))
+				.andExpect(jsonPath("$[1].body").value("Newest comment"));
+	}
+
+	@Test
 	void pendingCorrectionMustBeRegisteredAgainBeforeReview() throws Exception {
 		String token = accessToken("manager@local.dev", "DevManager123!");
 		MvcResult claim = createClaim(token, "Correction lifecycle").andExpect(status().isCreated()).andReturn();
