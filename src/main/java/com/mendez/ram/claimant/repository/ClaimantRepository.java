@@ -7,6 +7,6 @@ public interface ClaimantRepository extends JpaRepository<Claimant, Long> {
 	@EntityGraph(attributePaths = "organization")
 	Optional<Claimant> findWithOrganizationById(Long id);
 	@EntityGraph(attributePaths = "organization")
-	Optional<Claimant> findByNormalizedEmail(String normalizedEmail);
+	Optional<Claimant> findFirstByNormalizedEmail(String normalizedEmail);
 	Optional<Claimant> findFirstByNormalizedNameAndNormalizedEmailIsNullAndOrganizationIsNull(String normalizedName);
 }

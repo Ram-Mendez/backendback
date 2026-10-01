@@ -48,6 +48,7 @@ public class ClaimMapper {
 				request.priority() == null ? claim.getPriority() : request.priority(),
 				request.dueAt(),
 				request.slaDeadline(),
+				claim.getSlaBreachedAt(),
 				updatedBy,
 				updateTime);
 	}

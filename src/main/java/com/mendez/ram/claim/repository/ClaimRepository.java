@@ -36,6 +36,7 @@ public interface ClaimRepository extends JpaRepository<Claim, Long>, JpaSpecific
 	Optional<Claim> findLockedWithUsersById(@Param("id") Long id);
 
 	@Query("select claim.id from Claim claim where claim.slaDeadline <= :now and claim.slaBreachedAt is null "
+			+ "and claim.team is null "
 			+ "and claim.status not in (com.mendez.ram.claim.entity.ClaimStatus.ACCEPTED, "
 			+ "com.mendez.ram.claim.entity.ClaimStatus.REJECTED, com.mendez.ram.claim.entity.ClaimStatus.INADMISSIBLE)")
 	List<Long> findActiveOverdueSlaClaimIds(@Param("now") java.time.Instant now);

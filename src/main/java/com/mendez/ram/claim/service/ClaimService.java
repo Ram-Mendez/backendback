@@ -117,7 +117,9 @@ public class ClaimService {
 		} else if (canReviewClaims(principal)) {
 			specification = specification.and(ClaimSpecifications.visibleToReviewer(principal.id()));
 		} else {
-			specification = specification.and(ClaimSpecifications.createdById(principal.id()));
+			specification = specification
+					.and(ClaimSpecifications.createdById(principal.id()))
+					.and(ClaimSpecifications.visibleToReviewer(principal.id()));
 		}
 		Page<ClaimSummaryResponse> claimSummaryPage = claimRepository.findAll(specification, pageable)
 				.map(claimMapper::toClaimSummaryResponse);
@@ -525,7 +527,7 @@ public class ClaimService {
 		ensureAuthenticated(principal);
 		if (canAdministerClaims(principal)
 				|| isClaimOwner(claim, principal)
-				|| canReviewTeamClaim(claim, principal)) {
+				|| (canReviewClaims(principal) && isTeamAccessible(claim, principal))) {
 			return;
 		}
 
@@ -593,10 +595,7 @@ public class ClaimService {
 				|| principal.roles().contains("ROLE_ADMIN");
 	}
 
-	private static boolean canReviewTeamClaim(Claim claim, AuthenticatedUser principal) {
-		if (!canReviewClaims(principal)) {
-			return false;
-		}
+	private static boolean isTeamAccessible(Claim claim, AuthenticatedUser principal) {
 		return claim.getTeam() == null || claim.getTeam().containsUser(principal.id());
 	}
 

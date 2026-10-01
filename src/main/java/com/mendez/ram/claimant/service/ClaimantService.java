@@ -36,8 +36,14 @@ public class ClaimantService {
 		String email = request.email().trim();
 		Organization organization = organizations.findById(request.organizationId())
 				.orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ORGANIZATION", "La organizacion indicada no existe."));
-		Claimant claimant = claimants.findByNormalizedEmail(normalize(email)).orElseGet(() -> claimants.save(
-				new Claimant(request.name().trim(), normalize(request.name()), email, normalize(email), organization)));
+		String normalizedName = normalize(request.name());
+		Claimant claimant = claimants.findFirstByNormalizedEmail(normalize(email))
+				.orElseGet(() -> claimants.save(new Claimant(
+						request.name().trim(),
+						normalizedName,
+						email,
+						normalize(email),
+						organization)));
 		if (!claimant.getOrganization().getId().equals(organization.getId())) {
 			throw new ApiException(HttpStatus.CONFLICT, "CLAIMANT_EMAIL_CONFLICT", "El email ya pertenece a otro claimant.");
 		}

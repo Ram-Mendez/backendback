@@ -141,8 +141,7 @@ public final class ClaimSpecifications {
 			var teamMember = team.join("members", JoinType.LEFT);
 			return builder.or(
 					builder.isNull(root.get("team")),
-					builder.equal(teamMember.get("id"), userId),
-					builder.equal(root.get("createdBy").get("id"), userId));
+					builder.equal(teamMember.get("id"), userId));
 		};
 	}
 
